@@ -8,6 +8,7 @@ __pycache__/
 node_modules/
 dist/
 .env
+.env.test
 *.log
 .idea/
 .vscode/

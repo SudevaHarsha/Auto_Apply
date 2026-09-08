@@ -13,6 +13,11 @@ Two layers of drift protection against docs/database/schema.md:
 
 Usage (db container must be running with migrations applied):
     python tests/parity/schema_parity.py
+
+The golden pg_dump runs inside the target DB container. Which stack is dumped is
+selected by env (default = dev):
+    PARITY_COMPOSE      e.g. infra/docker-compose.test.yml  (default dev.yml)
+    PARITY_DB_SERVICE   e.g. db_test                        (default db)
 """
 
 from __future__ import annotations
@@ -29,7 +34,8 @@ import psycopg
 REPO = Path(__file__).resolve().parents[2]
 DOCS_SCHEMA = REPO.parent / "docs" / "database" / "schema.md"
 GOLDEN = REPO / "tests" / "parity" / "golden" / "schema_golden.sql"
-COMPOSE = REPO / "infra" / "docker-compose.dev.yml"
+COMPOSE = REPO / os.getenv("PARITY_COMPOSE", "infra/docker-compose.dev.yml")
+DB_SERVICE = os.getenv("PARITY_DB_SERVICE", "db")
 
 DEFAULT_MIGRATE_URL = "postgresql://autoapply:autoapply@localhost:5432/autoapply"
 
@@ -56,7 +62,7 @@ _RE_FORCE = re.compile(r"^ALTER TABLE (\w+) FORCE ROW LEVEL SECURITY", re.M)
 def dump_schema() -> str:
     """pg_dump the live schema (schema-only, no owner/privileges) via the db container."""
     result = subprocess.run(
-        ["docker", "compose", "-f", str(COMPOSE), "exec", "-T", "db",
+        ["docker", "compose", "-f", str(COMPOSE), "exec", "-T", DB_SERVICE,
          "pg_dump", "-U", "autoapply", "--schema-only", "--no-owner", "--no-privileges",
          "autoapply"],
         capture_output=True,

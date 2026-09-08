@@ -3,7 +3,8 @@ param([string]$Target = "test")
 $ErrorActionPreference = "Stop"
 
 function Load-Env {
-    $envFile = Join-Path (Get-Location) ".env"
+    param([string]$File = ".env")
+    $envFile = Join-Path (Get-Location) $File
     if (Test-Path $envFile) {
         Get-Content $envFile | ForEach-Object {
             $line = $_.Trim()
@@ -15,6 +16,15 @@ function Load-Env {
     }
 }
 
+function Load-TestEnv {
+    if (Test-Path (Join-Path (Get-Location) ".env.test")) {
+        Load-Env -File ".env.test"
+    } else {
+        Load-Env -File ".env.test.example"
+    }
+}
+
+# Dev env by default; test targets call Load-TestEnv (overrides URLs to :5435).
 Load-Env
 
 # Prefer the project venv when present (global `python` may be a bare shim).
@@ -24,14 +34,28 @@ if (Test-Path (Join-Path $PSScriptRoot ".venv\Scripts\python.exe")) {
 }
 
 function Wait-Db {
-    $compose = "infra/docker-compose.dev.yml"
+    param(
+        [string]$ComposeFile = "infra/docker-compose.dev.yml",
+        [string]$Service = "db"
+    )
     $ready = $false
     for ($i = 0; $i -lt 30; $i++) {
-        & docker compose -f $compose exec -T db pg_isready -U autoapply 2>$null | Out-Null
+        & docker compose -f $ComposeFile exec -T $Service pg_isready -U autoapply 2>$null | Out-Null
         if ($LASTEXITCODE -eq 0) { $ready = $true; break }
         Start-Sleep -Seconds 1
     }
-    if (-not $ready) { Write-Error "db did not become ready" }
+    if (-not $ready) { Write-Error "$Service did not become ready" }
+}
+
+function Run-Parity {
+    param(
+        [string]$ComposeFile,
+        [string]$DbService
+    )
+    Set-Item -Path env:PARITY_COMPOSE -Value $ComposeFile
+    Set-Item -Path env:PARITY_DB_SERVICE -Value $DbService
+    & $Py tests/parity/schema_parity.py
+    & $Py -m pytest tests/parity
 }
 
 switch ($Target) {
@@ -46,22 +70,43 @@ switch ($Target) {
     }
     "migrate" { & $Py db/run_migrations.py }
     "parity" {
-        & docker compose -f infra/docker-compose.dev.yml down -v
+        Load-TestEnv
+        Set-Item -Path env:PARITY_COMPOSE -Value "infra/docker-compose.test.yml"
+        Set-Item -Path env:PARITY_DB_SERVICE -Value "db_test"
+        & docker compose -f infra/docker-compose.test.yml down -v
+        & docker compose -f infra/docker-compose.test.yml up -d db_test
+        Wait-Db -ComposeFile "infra/docker-compose.test.yml" -Service "db_test"
+        & $Py db/run_migrations.py
+        Run-Parity -ComposeFile "infra/docker-compose.test.yml" -DbService "db_test"
+        & docker compose -f infra/docker-compose.test.yml down -v
+    }
+    "parity-dev" {
+        Set-Item -Path env:PARITY_COMPOSE -Value "infra/docker-compose.dev.yml"
+        Set-Item -Path env:PARITY_DB_SERVICE -Value "db"
         & docker compose -f infra/docker-compose.dev.yml up -d db
         Wait-Db
-        & $Py db/run_migrations.py
-        & $Py tests/parity/schema_parity.py
-        & $Py -m pytest tests/parity
-        & docker compose -f infra/docker-compose.dev.yml down
+        Run-Parity -ComposeFile "infra/docker-compose.dev.yml" -DbService "db"
     }
     "test-integration" {
-        & docker compose -f infra/docker-compose.dev.yml down -v
-        & docker compose -f infra/docker-compose.dev.yml up -d db
-        Wait-Db
+        Load-TestEnv
+        Set-Item -Path env:PARITY_COMPOSE -Value "infra/docker-compose.test.yml"
+        Set-Item -Path env:PARITY_DB_SERVICE -Value "db_test"
+        & docker compose -f infra/docker-compose.test.yml down -v
+        & docker compose -f infra/docker-compose.test.yml up -d db_test
+        Wait-Db -ComposeFile "infra/docker-compose.test.yml" -Service "db_test"
         & $Py db/run_migrations.py
         & $Py -m pytest tests/integration
-        & docker compose -f infra/docker-compose.dev.yml down
+        & docker compose -f infra/docker-compose.test.yml down -v
     }
     "test-e2e" { & $Py -m pytest tests/e2e }
+    "test-env-up" {
+        Load-TestEnv
+        Set-Item -Path env:PARITY_COMPOSE -Value "infra/docker-compose.test.yml"
+        Set-Item -Path env:PARITY_DB_SERVICE -Value "db_test"
+        & docker compose -f infra/docker-compose.test.yml up -d db_test
+        Wait-Db -ComposeFile "infra/docker-compose.test.yml" -Service "db_test"
+        & $Py db/run_migrations.py
+    }
+    "test-env-down" { Load-TestEnv; & docker compose -f infra/docker-compose.test.yml down }
     default { Write-Error "Unknown target: $Target" }
 }

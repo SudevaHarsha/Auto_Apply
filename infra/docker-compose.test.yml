@@ -1,0 +1,20 @@
+name: autoapply-test
+
+services:
+  db_test:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: ${TEST_POSTGRES_USER:-autoapply}
+      POSTGRES_PASSWORD: ${TEST_POSTGRES_PASSWORD:-autoapply}
+      POSTGRES_DB: ${TEST_POSTGRES_DB:-autoapply}
+    ports:
+      - "${TEST_POSTGRES_PORT:-5435}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${TEST_POSTGRES_USER:-autoapply}"]
+      interval: 5s
+      retries: 10
+    volumes:
+      - test_pgdata:/var/lib/postgresql/data
+
+volumes:
+  test_pgdata:
