@@ -6,6 +6,7 @@ requires-python = ">=3.12"
 dependencies = [
     "fastapi",
     "uvicorn[standard]",
+    "psycopg[binary]",
 ]
 
 [project.optional-dependencies]
@@ -29,6 +30,8 @@ packages = ["backend.app"]
 line-length = 120
 extend-exclude = ["vendor/**"]
 target-version = "py312"
+
+[tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]
 
 [tool.mypy]
