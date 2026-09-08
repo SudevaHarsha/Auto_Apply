@@ -1,0 +1,13 @@
+# Production/deploy stack (finalized in S19 per docs/architecture/deployment.md).
+# Until S19 this is a postgres-16-only stub so integration tests never depend on
+# unfinished services. Pre-populated only with the obligatory db service.
+services:
+  db:
+    image: postgres:16
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+volumes:
+  pgdata:

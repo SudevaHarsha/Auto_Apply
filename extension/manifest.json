@@ -1,0 +1,7 @@
+{
+  "manifest_version": 3,
+  "name": "AutoApply",
+  "version": "0.0.1",
+  "description": "Scaffold placeholder; real extension logic lands in S15.",
+  "permissions": []
+}
