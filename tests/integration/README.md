@@ -1,10 +1,13 @@
 # Integration tests (T1 + T2)
 
-Run against the **isolated test stack** (`db_test`, port 5435) — never dev/prod:
+Run against the **isolated test stack** (`db_test`, port 5435) — never dev/prod. Each
+`test-integration` run executes against a **disposable per-run clone** of the clean baseline
+(`app_test_<ts>`), so it is deterministic run-over-run while the stack stays up for
+inspection. See `docs/testing-environment.md` §3/§5.
 
 ```powershell
-.\tasks.ps1 -Target test-integration   # wipes + migrates the test DB, runs all tests, wipes on exit
-.\tasks.ps1 -Target parity             # same lifecycle, schema-parity + golden diff + docs matcher
+.\tasks.ps1 -Target test-integration   # clone baseline -> run all tests -> drop (keep newest)
+.\tasks.ps1 -Target parity             # schema-parity + golden diff + docs matcher vs baseline
 ```
 
 | File | Suite | Covers |

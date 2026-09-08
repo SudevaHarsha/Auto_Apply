@@ -1,0 +1,22 @@
+{
+  "Servers": {
+    "1": {
+      "Name": "Dev DB (host 5434)",
+      "Group": "AutoApply",
+      "Host": "host.docker.internal",
+      "Port": 5434,
+      "Username": "autoapply",
+      "SSLMode": "prefer",
+      "MaintenanceDB": "postgres"
+    },
+    "2": {
+      "Name": "Test DB (host 5435)",
+      "Group": "AutoApply",
+      "Host": "db_test",
+      "Port": 5432,
+      "Username": "autoapply",
+      "SSLMode": "prefer",
+      "MaintenanceDB": "postgres"
+    }
+  }
+}

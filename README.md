@@ -14,13 +14,16 @@ S19 per `docs/architecture/deployment.md`.
 - Python >= 3.12 (venv in `.venv`)
 - Task runner: `tasks.ps1` (machine has no `make`) — targets:
   `lint`, `test`, `dev-up`, `dev-down`, `test-integration`, `test-e2e`, `parity`,
-  `parity-dev`, `test-env-up`, `test-env-down`
+  `parity-dev`, `test-env-up`, `test-env-reset`, `test-env-down`
 - CI mirrors these targets; log drift between the two is a defect
 
 ## Test environment
 
-Tests run against a dedicated, disposable Postgres stack (`autoapply-test`, port 5435),
-completely separate from the dev database (port 5434). See
+Tests run against a dedicated Postgres stack (`autoapply-test`, port 5435), completely
+separate from the dev database (port 5434). The stack and a clean schema **baseline** are
+persistent; every `test-integration` run clones the baseline into a disposable per-run DB
+(`app_test_<ts>`) so runs are deterministic while the last run's data stays inspectable in
+pgAdmin (port 5050). See
 [`docs/testing-environment.md`](docs/testing-environment.md) for the isolation model,
 runbook, and guarantees.
 
