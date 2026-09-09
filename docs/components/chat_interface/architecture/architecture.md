@@ -16,19 +16,19 @@ User sends message (Web UI or Discord)
 |  chat_mode = 'bot'   -> Bot Mode (0 tokens)  |
 |  chat_mode = 'agent' -> Agent Mode (LLM)     |
 +----------------------------------------------+
-        |                                       
-        v                                       
+        |
+        v
 +----------------------------------------------+
 |  Execute command or tool call                 |
 +----------------------------------------------+
-        |                                       
-        v                                       
+        |
+        v
 +----------------------------------------------+
 |  Format response                              |
 |  Web UI: React card  |  Discord: Embed card   |
 +----------------------------------------------+
-        |                                       
-        v                                       
+        |
+        v
   Return to user
 ```
 
@@ -86,20 +86,20 @@ Switch to agent            /mode agent/i                          (local setting
 ```python
 def process_bot_message(message: str, user_id: str) -> dict:
     """Process user message in Bot Mode. Zero LLM tokens."""
-    
+
     message = message.strip().lower()
-    
+
     # Try each command pattern
     for cmd_name, cmd_config in COMMANDS.items():
         match = re.match(cmd_config["pattern"], message, re.IGNORECASE)
         if match:
             # Extract parameters from match groups
             params = extract_params(match, cmd_config)
-            
+
             # Handle local commands (help, mode switch)
             if cmd_config["endpoint"] is None:
                 return handle_local_command(cmd_name, params)
-            
+
             # Call Backend API
             response = call_api(
                 method=cmd_config["method"],
@@ -107,9 +107,9 @@ def process_bot_message(message: str, user_id: str) -> dict:
                 query=cmd_config.get("params", {}),
                 user_id=user_id
             )
-            
+
             return format_response(cmd_name, response)
-    
+
     # No pattern matched
     return {
         "type": "error",
@@ -267,26 +267,26 @@ User:  Find Python jobs and score them
 
 Agent: [calls search_jobs(query="Python")]
        Found 3 Python jobs:
-       
+
        1. Senior Python Dev - Acme Corp (Not scored)
        2. Python Engineer - Meta (Score: 72/100)
        3. Backend Python - Startup (Not scored)
-       
+
        Want me to score the unscored ones?
 
 User:  Yes, score all 3
 
 Agent: [calls analyze_match for each unscored job]
        Results:
-       
+
        1. Senior Python Dev - Acme Corp: 87/100
           Strengths: Python, FastAPI, PostgreSQL
           Weaknesses: No Kubernetes experience
-       
+
        3. Backend Python - Startup: 65/100
           Strengths: Python, Django
           Weaknesses: Missing AWS, too junior
-       
+
        Best match: Acme Corp (87/100)
        Want me to approve it?
 
@@ -294,14 +294,14 @@ User:  Approve Acme
 
 Agent: [calls approve_job(job_id="...")]
        Approved! Pipeline started for Senior Python Dev at Acme Corp.
-       
+
        Pipeline steps:
        [x] JD Extraction
        [ ] Rubric Generation
        [ ] Scoring
        [ ] Optimization
        [ ] Package Generation
-       
+
        I'll notify you when it's done.
 ```
 
@@ -310,10 +310,10 @@ Agent: [calls approve_job(job_id="...")]
 ```python
 def process_agent_message(message: str, user_id: str) -> dict:
     """Process user message in Agent Mode. Uses LLM."""
-    
+
     # 1. Build context
     context = build_context(user_id)
-    
+
     # 2. Call LLM with tools
     llm_response = call_llm(
         system=AGENT_SYSTEM_PROMPT,
@@ -321,20 +321,20 @@ def process_agent_message(message: str, user_id: str) -> dict:
         tools=TOOLS,
         context=context
     )
-    
+
     # 3. Execute tool calls
     tool_results = []
     for tool_call in llm_response.tool_calls:
         result = execute_tool(tool_call, user_id)
         tool_results.append(result)
-    
+
     # 4. Generate final response
     final_response = call_llm(
         system=AGENT_SYSTEM_PROMPT,
         message=f"Tool results: {tool_results}",
         tools=None  # No more tools needed
     )
-    
+
     return format_response("agent", final_response)
 ```
 
