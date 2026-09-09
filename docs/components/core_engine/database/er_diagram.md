@@ -64,9 +64,9 @@ Entity-Relationship diagram for tables owned by the core engine component.
     │ steps_run []      │    │ metadata JSONB    │
     │ total_time_ms     │    │ created_at        │
     │ error_message     │    └───────────────────┘
-    │ trigger           │                         
-    │ created_at        │                         
-    └───────────────────┘                         
+    │ trigger           │
+    │ created_at        │
+    └───────────────────┘
 
   ┌───────────────────┐   (shared, RLS-exempt — no user_id)
   │  job_snapshots    │

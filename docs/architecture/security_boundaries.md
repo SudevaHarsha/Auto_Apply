@@ -225,7 +225,7 @@ Chrome Extension
 └── Data flow:
     Backend ──REST──▶ Extension ──DOM──▶ ATS Website
                   (profile data)    (form fields)
-    
+
     No data sent to third parties from extension.
     All API calls go through backend, not page scripts.
 ```

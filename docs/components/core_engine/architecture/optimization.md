@@ -104,7 +104,7 @@ Example:
   BEFORE: "Built REST APIs using Python and Flask"
   AFTER:  "Designed and implemented RESTful APIs using Python/Flask
            for backend services"
-  
+
   Same facts. Better words. No fabrication.
 ```
 

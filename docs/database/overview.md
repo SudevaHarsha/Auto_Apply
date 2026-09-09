@@ -82,16 +82,16 @@ Each component has its own database folder with overview, schema, and ER diagram
      │            │ at       │      │ updated_ │
      │            │ updated_ │      │ at       │
      │            │ at       │      └──────────┘
-     │            │ freshness│                  
-     │            │ state    │                  
-     │            │ content_ │                  
-     │            │ hash     │                  
-     │            │ current_ │                  
-     │            │ snapshot │                  
-     │            │ id       │                  
-     │            │ last_    │                  
-     │            │ fetched_ │                  
-     │            │ at       │                  
+     │            │ freshness│
+     │            │ state    │
+     │            │ content_ │
+     │            │ hash     │
+     │            │ current_ │
+     │            │ snapshot │
+     │            │ id       │
+     │            │ last_    │
+     │            │ fetched_ │
+     │            │ at       │
      │            └────┬─────┘
      │                 │
      │                 │ 1:N
