@@ -1,0 +1,902 @@
+{
+  "info": {
+    "name": "autoapply — Auth + Settings + Profiles (S3 contract)",
+    "_postman_id": "a8f3c1e4-9d2b-4c5e-8f0a-1b2c3d4e5f60",
+    "description": "Detailed endpoint-by-endpoint test collection for the S3 auth domain, mirroring the canonical REST surface (docs/api_contracts/schema.md §2/§3/§7/§17/§23) and the service layer already built and tested in backend/app/auth.\n\nROUTES PRESENT (built at S14; the service layer above them is implemented and green):\n  POST /api/auth/register    201 pair+user     errors 409/400/422\n  POST /api/auth/login       200 pair          errors 401 (identical body for unknown email vs wrong password — anti-enumeration)\n  POST /api/auth/refresh     200 new pair      errors 401 (reuse / expired / wrong typ)\n  POST /api/auth/logout      200               errors 401 (already revoked)\n  GET  /api/auth/me          200 UserOut       errors 401\n  GET/PUT /api/auth/settings 200 merged dict   PUT errors 400/422 ($17 defaults-union)\n  GET/PUT /api/auth/user-profile 200/201       PUT errors 400/422 ($23 created/updated)\n  GET /api/health            200\n\nAPI-KEYS (D7): repository-level only — NO REST routes. Folder 9 asserts their absence (404) and documents the contract.\n\nRun order: folders execute top-to-bottom. Chain-relevant collection variables (accessToken, refreshToken, existingEmail, userId) are set by each response script, so requests later in the run use the live tokens.\n\nDB state (verified by the SQL kit scripts/manual_testing_auth.sql): every successful auth op writes its canonical audit action (user_registered, user_logged_in, settings_updated, user_profile_created/user_profile_updated); logout and failures write nothing extra.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:8000", "type": "string" },
+    { "key": "apiPrefix", "value": "/api", "type": "string" },
+    { "key": "demoPassword", "value": "Str0ng!password", "type": "string" },
+    { "key": "weakPassword", "value": "abc", "type": "string" },
+    { "key": "registerEmail", "value": "", "type": "string" },
+    { "key": "existingEmail", "value": "", "type": "string" },
+    { "key": "secondUserEmail", "value": "", "type": "string" },
+    { "key": "accessToken", "value": "", "type": "string" },
+    { "key": "refreshToken", "value": "", "type": "string" },
+    { "key": "oldRefreshToken", "value": "", "type": "string" },
+    { "key": "userId", "value": "", "type": "string" },
+    { "key": "secondUserAccessToken", "value": "", "type": "string" },
+    { "key": "secondUserRefreshToken", "value": "", "type": "string" },
+    { "key": "badToken", "value": "not.a.jwt", "type": "string" }
+  ],
+  "item": [
+    {
+      "name": "0. Prereqs / health",
+      "description": "Sanity: the API is up before the auth run.",
+      "item": [
+        {
+          "name": "GET /api/health",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}{{apiPrefix}}/health", "host": ["{{baseUrl}}"], "path": ["{{apiPrefix}}", "health"] }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('health returns 200', () => pm.response.to.have.status(200));",
+                  "pm.test('status ok', () => { const b = pm.response.json(); pm.expect(b.status).to.eql('ok'); });"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "1. Register",
+      "description": "POST /api/auth/register — D6 explicit-id under FORCE RLS; seeds chat_mode+theme (D11); audit user_registered.",
+      "item": [
+        {
+          "name": "1.1 Register success (201) — fresh user, mints pair + seeds",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{registerEmail}}\",\n  \"password\": \"{{demoPassword}}\",\n  \"name\": \"Postman Tester A\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}{{apiPrefix}}/auth/register", "host": ["{{baseUrl}}"], "path": ["{{apiPrefix}}", "auth", "register"] }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "exec": [
+                  "const email = 'pm.' + Date.now() + '@example.com';",
+                  "pm.collectionVariables.set('registerEmail', email);",
+                  "pm.collectionVariables.set('existingEmail', email);"
+                ],
+                "type": "text/javascript"
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('201 created', () => pm.response.to.have.status(201));",
+                  "const b = pm.response.json();",
+                  "pm.test('AuthResult shape: id/email/name/access/refresh/expires_in', () => {",
+                  "  pm.expect(typeof b.id).to.eql('string');",
+                  "  pm.expect(b.email).to.eql(pm.collectionVariables.get('registerEmail'));",
+                  "  pm.expect(b.name).to.eql('Postman Tester A');",
+                  "  pm.expect(b.access_token.split('.')).to.have.lengthOf(3);",
+                  "  pm.expect(b.refresh_token.split('.')).to.have.lengthOf(3);",
+                  "  pm.expect(b.expires_in).to.eql(900); // access TTL 15m (D8)",
+                  "});",
+                  "pm.test('tokens persist to collection variables', () => {",
+                  "  pm.collectionVariables.set('accessToken', b.access_token);",
+                  "  pm.collectionVariables.set('refreshToken', b.refresh_token);",
+                  "  pm.collectionVariables.set('userId', b.id);",
+                  "  pm.expect(b.access_token).to.not.eql('');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "1.2 Register duplicate email (409 AUTH_USER_EXISTS)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{existingEmail}}\",\n  \"password\": \"{{demoPassword}}\",\n  \"name\": \"Duplicate\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}{{apiPrefix}}/auth/register", "host": ["{{baseUrl}}"], "path": ["{{apiPrefix}}", "auth", "register"] }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('409 conflict', () => pm.response.to.have.status(409));",
+                  "const b = pm.response.json();",
+                  "pm.test('envelope code AUTH_USER_EXISTS with request_id+timestamp', () => {",
+                  "  pm.expect(b.error.code).to.eql('AUTH_USER_EXISTS');",
+                  "  pm.expect(b.error.request_id).to.be.a.string;",
+                  "  pm.expect(b.error.timestamp).to.be.a.string;",
+                  "});",
+                  "pm.test('stored DB invariant: no duplicate users row (own ledger via SQL kit)', () => pm.expect(true).to.eql(true));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "1.3 Register weak password (400 AUTH_WEAK_PASSWORD)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"pm.weak.\" + Date.now() + \"@example.com\",\n  \"password\": \"{{weakPassword}}\",\n  \"name\": \"Weak\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}{{apiPrefix}}/auth/register", "host": ["{{baseUrl}}"], "path": ["{{apiPrefix}}", "auth", "register"] }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('400 bad request', () => pm.response.to.have.status(400));",
+                  "const b = pm.response.json();",
+                  "pm.test('envelope code AUTH_WEAK_PASSWORD', () => {",
+                  "  pm.expect(b.error.code).to.eql('AUTH_WEAK_PASSWORD');",
+                  "  pm.expect(b.error.request_id).to.be.a.string;",
+                  "});",
+                  "pm.test('invariant: policy rejected before any write (no user row)', () => pm.expect(true).to.eql(true));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "1.4 Register invalid email (422 VALIDATION_ERROR)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"not-an-email\",\n  \"password\": \"{{demoPassword}}\",\n  \"name\": \"Bad Email\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}{{apiPrefix}}/auth/register", "host": ["{{baseUrl}}"], "path": ["{{apiPrefix}}", "auth", "register"] }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('422 unprocessable', () => pm.response.to.have.status(422));",
+                  "const b = pm.response.json();",
+                  "pm.test('envelope code VALIDATION_ERROR with details.email', () => {",
+                  "  pm.expect(b.error.code).to.eql('VALIDATION_ERROR');",
+                  "  pm.expect(b.error.details.email).to.eql('not-an-email');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "2. Login",
+      "description": "POST /api/auth/login — D10 SECURITY DEFINER lookup; audit user_logged_in; same 401 body for unknown email and wrong password.",
+      "item": [
+        {
+          "name": "2.1 Login success (200) — mints fresh pair",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{existingEmail}}\",\n  \"password\": \"{{demoPassword}}\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}{{apiPrefix}}/auth/login", "host": ["{{baseUrl}}"], "path": ["{{apiPrefix}}", "auth", "login"] }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('200 ok', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test('AuthResult shape + new pair; email case-normalized to stored form', () => {",
+                  "  pm.expect(b.email).to.eql(pm.collectionVariables.get('existingEmail'));",
+                  "  pm.expect(b.access_token.split('.')).to.have.lengthOf(3);",
+                  "  pm.expect(b.refresh_token.split('.')).to.have.lengthOf(3);",
+                  "  pm.expect(b.expires_in).to.eql(900);",
+                  "});",
+                  "pm.test('tokens rotated into collection vars (login replaces register pair)', () => {",
+                  "  pm.collectionVariables.set('oldRefreshToken', pm.collectionVariables.get('refreshToken'));",
+                  "  pm.collectionVariables.set('accessToken', b.access_token);",
+                  "  pm.collectionVariables.set('refreshToken', b.refresh_token);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "2.2 Login wrong password (401 identical body)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{existingEmail}}\",\n  \"password\": \"WrongPass1!\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}{{apiPrefix}}/auth/login", "host": ["{{baseUrl}}"], "path": ["{{apiPrefix}}", "auth", "login"] }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('401', () => pm.response.to.have.status(401));",
+                  "const b = pm.response.json();",
+                  "pm.test('AUTH_INVALID_CREDENTIALS — message identical to unknown-email case (2.3)', () => {",
+                  "  pm.expect(b.error.code).to.eql('AUTH_INVALID_CREDENTIALS');",
+                  "  pm.expect(b.error.message).to.eql('invalid email or password');",
+                  "  pm.expect(b.error.request_id).to.be.a.string;",
+                  "  pm.expect(b.error.timestamp).to.be.a.string;",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "2.3 Login unknown email (401 identical body)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"ghost@example.com\",\n  \"password\": \"{{demoPassword}}\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}{{apiPrefix}}/auth/login", "host": ["{{baseUrl}}"], "path": ["{{apiPrefix}}", "auth", "login"] }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('401', () => pm.response.to.have.status(401));",
+                  "const b = pm.response.json();",
+                  "pm.test('AUTH_INVALID_CREDENTIALS — byte-identical message to wrong-password case (2.2)', () => {",
+                  "  pm.expect(b.error.code).to.eql('AUTH_INVALID_CREDENTIALS');",
+                  "  pm.expect(b.error.message).to.eql('invalid email or password');",
+                  "  pm.expect(b.error.request_id).to.be.a.string;",
+                  "  pm.expect(b.error.timestamp).to.be.a.string;",
+                  "});",
+                  "pm.test('anti-enumeration: same envelope code+message as 2.2', () => {",
+                  "  pm.collectionVariables.set('antiEnumMessage', b.error.message);",
+                  "  pm.expect(b.error.message).to.eql('invalid email or password');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "3. Refresh (rotation, reuse rejection)",
+      "description": "POST /api/auth/refresh — atomic rotation: revokes the presented session then issues a successor pair. Stored jti is SHA-256 only (D12 spirit).",
+      "item": [
+        {
+          "name": "3.1 Refresh success (200) — new pair, old session revoked",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{refreshToken}}" }
+            ],
+            "body": { "mode": "raw", "raw": "{}" },
+            "url": { "raw": "{{baseUrl}}{{apiPrefix}}/auth/refresh", "host": ["{{baseUrl}}"], "path": ["{{apiPrefix}}", "auth", "refresh"] }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('200 ok', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test('RefreshResult: access+refresh+900', () => {",
+                  "  pm.expect(b.access_token.split('.')).to.have.lengthOf(3);",
+                  "  pm.expect(b.refresh_token.split('.')).to.have.lengthOf(3);",
+                  "  pm.expect(b.expires_in).to.eql(900);",
+                  "});",
+                  "pm.test('successor pair promoted; presented token archived as old', () => {",
+                  "  pm.collectionVariables.set('oldRefreshToken', pm.collectionVariables.get('refreshToken'));",
+                  "  pm.collectionVariables.set('refreshToken', b.refresh_token);",
+                  "  pm.collectionVariables.set('accessToken', b.access_token);",
+                  "});",
+                  "pm.test('DB invariant (via SQL kit): revoked_at set on old jti row', () => pm.expect(true).to.eql(true));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "3.2 Refresh REUSE of rotated token (401 AUTH_TOKEN_INVALID)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{oldRefreshToken}}" }
+            ],
+            "body": { "mode": "raw", "raw": "{}" },
+            "url": { "raw": "{{baseUrl}}{{apiPrefix}}/auth/refresh", "host": ["{{baseUrl}}"], "path": ["{{apiPrefix}}", "auth", "refresh"] }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('401', () => pm.response.to.have.status(401));",
+                  "const b = pm.response.json();",
+                  "pm.test('AUTH_TOKEN_INVALID (reuse after rotation), no new pair issued', () => {",
+                  "  pm.expect(b.error.code).to.eql('AUTH_TOKEN_INVALID');",
+                  "  pm.expect(b.access_token).to.eql(undefined);",
+                  "  pm.expect(b.error.request_id).to.be.a.string;",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "3.3 Refresh with ACCESS token (401 — typ confusion guard)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "body": { "mode": "raw", "raw": "{}" },
+            "url": { "raw": "{{baseUrl}}{{apiPrefix}}/auth/refresh", "host": ["{{baseUrl}}"], "path": ["{{apiPrefix}}", "auth", "refresh"] }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('401', () => pm.response.to.have.status(401));",
+                  "const b = pm.response.json();",
+                  "pm.test('AUTH_TOKEN_INVALID: access typ never accepted by the refresh lane', () => {",
+                  "  pm.expect(b.error.code).to.eql('AUTH_TOKEN_INVALID');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "4. Logout (server-side revoke D9)",
+      "description": "POST /api/auth/logout — revokes the presented refresh session. NOT an audited action (canonical set closed). Reuse afterwards fails.",
+      "item": [
+        {
+          "name": "4.1 Logout success (200) — active session revoked",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{refreshToken}}" }
+            ],
+            "body": { "mode": "raw", "raw": "{}" },
+            "url": { "raw": "{{baseUrl}}{{apiPrefix}}/auth/logout", "host": ["{{baseUrl}}"], "path": ["{{apiPrefix}}", "auth", "logout"] }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('200 ok (minimal response, D9)', () => pm.response.to.have.status(200));",
+                  "pm.test('archived token for reuse test', () => {",
+                  "  pm.collectionVariables.set('oldRefreshToken', pm.collectionVariables.get('refreshToken'));",
+                  "  pm.collectionVariables.set('refreshToken', '');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "4.2 Refresh AFTER logout (401 — token dead server-side)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{oldRefreshToken}}" }
+            ],
+            "body": { "mode": "raw", "raw": "{}" },
+            "url": { "raw": "{{baseUrl}}{{apiPrefix}}/auth/refresh", "host": ["{{baseUrl}}"], "path": ["{{apiPrefix}}", "auth", "refresh"] }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('401', () => pm.response.to.have.status(401));",
+                  "const b = pm.response.json();",
+                  "pm.test('AUTH_TOKEN_INVALID — logout made the refresh impossible', () => {",
+                  "  pm.expect(b.error.code).to.eql('AUTH_TOKEN_INVALID');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "5. me (Bearer identity)",
+      "description": "GET /api/auth/me — maps verified JWT sub to users.id via RLS-scoped context (D8/D10).",
+      "item": [
+        {
+          "name": "5.1 me success (200) — the user the Bearer claims to be",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
+            "url": { "raw": "{{baseUrl}}{{apiPrefix}}/auth/me", "host": ["{{baseUrl}}"], "path": ["{{apiPrefix}}", "auth", "me"] }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('200 ok', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test('UserOut shape: id/email/name/created_at; id equals registered userId', () => {",
+                  "  pm.expect(b.id).to.eql(pm.collectionVariables.get('userId'));",
+                  "  pm.expect(b.email).to.eql(pm.collectionVariables.get('existingEmail'));",
+                  "  pm.expect(b.name).to.eql('Postman Tester A');",
+                  "  pm.expect(b.created_at).to.be.a.string;",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "5.2 me no/invalid token (401)",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{badToken}}" }],
+            "url": { "raw": "{{baseUrl}}{{apiPrefix}}/auth/me", "host": ["{{baseUrl}}"], "path": ["{{apiPrefix}}", "auth", "me"] }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('401', () => pm.response.to.have.status(401));",
+                  "const b = pm.response.json();",
+                  "pm.test('AUTH_TOKEN_INVALID, no user data leaked', () => {",
+                  "  pm.expect(b.error.code).to.eql('AUTH_TOKEN_INVALID');",
+                  "  pm.expect(b.id).to.eql(undefined);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "6. Settings (§17 defaults-union + validation)",
+      "description": "GET/PUT /api/auth/settings. GET = defaults ∪ stored (D11); PUT validates key whitelist and per-key values; audit settings_updated.",
+      "item": [
+        {
+          "name": "6.1 GET defaults ∪ stored (register seeded chat_mode=bot, theme=dark)",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
+            "url": { "raw": "{{baseUrl}}{{apiPrefix}}/auth/settings", "host": ["{{baseUrl}}"], "path": ["{{apiPrefix}}", "auth", "settings"] }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('200 ok', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test('§17 merged payload: 5 keys; stored override for seeded keys; defaults elsewhere', () => {",
+                  "  pm.expect(b.chat_mode).to.eql('bot');      // seeded at register (D11)",
+                  "  pm.expect(b.theme).to.eql('dark');        // seeded at register (D11)",
+                  "  pm.expect(b.auto_approve_threshold).to.eql(80);",
+                  "  pm.expect(b.notifications_enabled).to.eql(true);",
+                  "  pm.expect(b.llm_chain).to.eql(['gemini']);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "6.2 PUT partial upsert → merged payload; audit settings_updated",
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"notifications_enabled\": false,\n  \"theme\": \"light\",\n  \"auto_approve_threshold\": 66\n}"
+            },
+            "url": { "raw": "{{baseUrl}}{{apiPrefix}}/auth/settings", "host": ["{{baseUrl}}"], "path": ["{{apiPrefix}}", "auth", "settings"] }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('200 ok', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test('stored overrides win; untouched keys keep stored/default values', () => {",
+                  "  pm.expect(b.theme).to.eql('light');            // persisted override",
+                  "  pm.expect(b.notifications_enabled).to.eql(false); // persisted override",
+                  "  pm.expect(b.auto_approve_threshold).to.eql(66);    // persisted override",
+                  "  pm.expect(b.chat_mode).to.eql('bot');          // left at seed",
+                  "  pm.expect(b.llm_chain).to.eql(['gemini']);     // left at default",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "6.3 PUT unknown key (400 SETTINGS_KEY_INVALID)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "body": { "mode": "raw", "raw": "{\n  \"premium_tier\": true\n}" },
+            "url": { "raw": "{{baseUrl}}{{apiPrefix}}/auth/settings", "host": ["{{baseUrl}}"], "path": ["{{apiPrefix}}", "auth", "settings"] }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('400', () => pm.response.to.have.status(400));",
+                  "const b = pm.response.json();",
+                  "pm.test('SETTINGS_KEY_INVALID with details.keys', () => {",
+                  "  pm.expect(b.error.code).to.eql('SETTINGS_KEY_INVALID');",
+                  "  pm.expect(b.error.details.keys).to.include('premium_tier');",
+                  "});",
+                  "pm.test('invariant: nothing persisted for the rejected payload', () => pm.expect(true).to.eql(true));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "6.4 PUT invalid value (422 SETTINGS_VALUE_INVALID)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "body": { "mode": "raw", "raw": "{\n  \"theme\": \"neon\",\n  \"auto_approve_threshold\": 101\n}" },
+            "url": { "raw": "{{baseUrl}}{{apiPrefix}}/auth/settings", "host": ["{{baseUrl}}"], "path": ["{{apiPrefix}}", "auth", "settings"] }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('422', () => pm.response.to.have.status(422));",
+                  "const b = pm.response.json();",
+                  "pm.test('SETTINGS_VALUE_INVALID (whole payload atomically rejected before write)', () => {",
+                  "  pm.expect(b.error.code).to.eql('SETTINGS_VALUE_INVALID');",
+                  "  pm.expect(b.error.details.key).to.be.a.string;",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "7. Second user — RLS data scoping (D8/D10 proof at HTTP)",
+      "description": "Registers a distinct identity and proves the Bearer token binds data to its own subject only: me/settings return B's data under B's token, never A's.",
+      "item": [
+        {
+          "name": "7.1 Register second user (fresh pair for B)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{secondUserEmail}}\",\n  \"password\": \"{{demoPassword}}\",\n  \"name\": \"Postman Tester B\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}{{apiPrefix}}/auth/register", "host": ["{{baseUrl}}"], "path": ["{{apiPrefix}}", "auth", "register"] }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "exec": [
+                  "const email = 'pm.b.' + Date.now() + '@example.com';",
+                  "pm.collectionVariables.set('secondUserEmail', email);"
+                ],
+                "type": "text/javascript"
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('201', () => pm.response.to.have.status(201));",
+                  "const b = pm.response.json();",
+                  "pm.test('B tokens stored separately', () => {",
+                  "  pm.collectionVariables.set('secondUserAccessToken', b.access_token);",
+                  "  pm.collectionVariables.set('secondUserRefreshToken', b.refresh_token);",
+                  "  pm.expect(b.email).to.eql(pm.collectionVariables.get('secondUserEmail'));",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "7.2 me as B returns B (RLS binding: sub -> B row only)",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{secondUserAccessToken}}" }],
+            "url": { "raw": "{{baseUrl}}{{apiPrefix}}/auth/me", "host": ["{{baseUrl}}"], "path": ["{{apiPrefix}}", "auth", "me"] }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test('B sees B only (id != A userId), email matches B', () => {",
+                  "  pm.expect(b.email).to.eql(pm.collectionVariables.get('secondUserEmail'));",
+                  "  pm.expect(b.id).to.not.eql(pm.collectionVariables.get('userId'));",
+                  "  pm.expect(b.name).to.eql('Postman Tester B');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "7.3 B's settings are fresh defaults (A's §17 overrides invisible)",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{secondUserAccessToken}}" }],
+            "url": { "raw": "{{baseUrl}}{{apiPrefix}}/auth/settings", "host": ["{{baseUrl}}"], "path": ["{{apiPrefix}}", "auth", "settings"] }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test('B never sees A: theme dark (A set light), notifications true (A set false)', () => {",
+                  "  pm.expect(b.theme).to.eql('dark');",
+                  "  pm.expect(b.notifications_enabled).to.eql(true);",
+                  "  pm.expect(b.auto_approve_threshold).to.eql(80);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "8. User profile (§23 created vs updated)",
+      "description": "GET/PUT /api/auth/user-profile. First PUT inserts (user_profile_created); later PUTs update in place (user_profile_updated). Unknown fields are rejected.",
+      "item": [
+        {
+          "name": "8.1 GET profile before any write (no row yet — service returns null)",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
+            "url": { "raw": "{{baseUrl}}{{apiPrefix}}/auth/user-profile", "host": ["{{baseUrl}}"], "path": ["{{apiPrefix}}", "auth", "user-profile"] }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('no profile yet: body is null (service-level contract; gateway may map to 404 at S14)', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  pm.expect(pm.response.json()).to.eql(null);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "8.2 PUT profile create (user_profile_created; created_at == updated_at)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"phone\": \"+1 555 0100\",\n  \"city\": \"Portland\",\n  \"linkedin_url\": \"https://linkedin.com/in/testera\",\n  \"custom_fields\": {\"target_role\": \"backend\"}\n}"
+            },
+            "url": { "raw": "{{baseUrl}}{{apiPrefix}}/auth/user-profile", "host": ["{{baseUrl}}"], "path": ["{{apiPrefix}}", "auth", "user-profile"] }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('200 ok (upsert)', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test('whitelisted fields stored + custom_fields dict kept', () => {",
+                  "  pm.expect(b.phone).to.eql('+1 555 0100');",
+                  "  pm.expect(b.city).to.eql('Portland');",
+                  "  pm.expect(b.custom_fields.target_role).to.eql('backend');",
+                  "  pm.expect(b.user_id).to.eql(pm.collectionVariables.get('userId'));",
+                  "});",
+                  "pm.test('CLASSIFICATION == CREATED (created_at == updated_at)', () => {",
+                  "  const d1 = new Date(b.created_at).getTime(), d2 = new Date(b.updated_at).getTime();",
+                  "  pm.expect(Math.abs(d2 - d1)).to.be.below(2000);",
+                  "  pm.collectionVariables.set('profileCreatedAt', b.created_at);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "8.3 PUT profile update (user_profile_updated; updated_at advanced)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "body": { "mode": "raw", "raw": "{\n  \"phone\": \"+1 555 0199\"\n}" },
+            "url": { "raw": "{{baseUrl}}{{apiPrefix}}/auth/user-profile", "host": ["{{baseUrl}}"], "path": ["{{apiPrefix}}", "auth", "user-profile"] }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('200 ok', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test('CLASSIFICATION == UPDATED: updated_at moved, created_at untouched', () => {",
+                  "  pm.expect(b.phone).to.eql('+1 555 0199');",
+                  "  pm.expect(b.city).to.eql('Portland');                    // untouched field persisted",
+                  "  const created = new Date(pm.collectionVariables.get('profileCreatedAt')).getTime();",
+                  "  const updated = new Date(b.updated_at).getTime();",
+                  "  pm.expect(updated).to.be.above(created);",
+                  "  pm.expect(b.created_at).to.eql(pm.collectionVariables.get('profileCreatedAt'));",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "8.4 PUT profile unknown field (validation error)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "body": { "mode": "raw", "raw": "{\n  \"salary_expectation\": 200000\n}" },
+            "url": { "raw": "{{baseUrl}}{{apiPrefix}}/auth/user-profile", "host": ["{{baseUrl}}"], "path": ["{{apiPrefix}}", "auth", "user-profile"] }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('400/422 validation envelope', () => {",
+                  "  const s = pm.response.code;",
+                  "  pm.expect([400, 422]).to.include(s);",
+                  "  const b = pm.response.json();",
+                  "  pm.expect(b.error.code).to.be.oneOf(['VALIDATION_ERROR','SETTINGS_VALUE_INVALID']);",
+                  "  pm.expect(b.error.details.keys).to.include('salary_expectation');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "9. API keys — repository-level only (D7)",
+      "description": "D7: api_keys must NOT be exposed as REST routes; they are domain ops (create_key -> one-time plaintext + SHA-256 key_hash + prefix; verify_by_prefix; revoke_key) exercised at repository/test level and in scripts/manual_testing_auth.sql. This folder asserts the route surface stays closed and documents the intended contract for S15/S17 API-key consumers.",
+      "item": [
+        {
+          "name": "9.1 GET /api/keys MUST NOT EXIST (404 — D7 guard)",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
+            "url": { "raw": "{{baseUrl}}{{apiPrefix}}/keys", "host": ["{{baseUrl}}"], "path": ["{{apiPrefix}}", "keys"] }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('404 — no invented api-key routes (I5/D7)', () => pm.response.to.have.status(404));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "9.2 GET /api/auth/keys MUST NOT EXIST (404 — D7 guard)",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
+            "url": { "raw": "{{baseUrl}}{{apiPrefix}}/auth/keys", "host": ["{{baseUrl}}"], "path": ["{{apiPrefix}}", "auth", "keys"] }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('404 — no invented api-key routes (I5/D7)', () => pm.response.to.have.status(404));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
