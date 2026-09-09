@@ -1691,4 +1691,3 @@ ALTER TABLE public.users ENABLE ROW LEVEL SECURITY;
 --
 
 \unrestrict tNojhZBpWYBkStkPQiZAzaszFlnZF8pyqEWIz22jPBySg8PSUtpi94KixZ6NfuE
-

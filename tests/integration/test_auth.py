@@ -42,9 +42,7 @@ from backend.app.main import app
 
 os.environ.setdefault("JWT_SECRET", "test-secret-0123456789abcdef0123456789abcdef")
 
-APP_URL = os.getenv(
-    "DATABASE_URL", "postgresql://app_user:changeme_in_production@localhost:5432/autoapply"
-)
+APP_URL = os.getenv("DATABASE_URL", "postgresql://app_user:changeme_in_production@localhost:5432/autoapply")
 
 PASSWORD = "Str0ng!password"
 WEAK_PASSWORD = "short"
@@ -70,9 +68,7 @@ async def _register(email: str | None = None) -> tuple[psycopg.AsyncConnection, 
     """Register a fresh user; returns (open conn, {email, result: AuthResult})."""
     conn = await _conn()
     try:
-        result = await AuthService(conn).register(
-            email=email or _email(), password=PASSWORD, name="Auto Apply Tester"
-        )
+        result = await AuthService(conn).register(email=email or _email(), password=PASSWORD, name="Auto Apply Tester")
     except Exception:
         await conn.close()
         raise
@@ -152,9 +148,7 @@ async def test_login_success_and_audit_row() -> None:
         assert result.id == bag["result"].id
         assert result.access_token and result.refresh_token
         async with DbContext(conn, result.id).transaction() as db:
-            n = await db.fetch_scalar(
-                "SELECT count(*) FROM audit_logs WHERE action = 'user_logged_in'"
-            )
+            n = await db.fetch_scalar("SELECT count(*) FROM audit_logs WHERE action = 'user_logged_in'")
         assert int(n or 0) == 1
     finally:
         await conn.close()
@@ -257,8 +251,7 @@ async def test_logout_revokes_session_server_side() -> None:
             await svc.refresh(refresh_token=bag["result"].refresh_token)
         async with DbContext(conn, bag["result"].id).transaction() as db:
             n = await db.fetch_scalar(
-                "SELECT count(*) FROM auth_sessions "
-                "WHERE jti_hash = %s AND revoked_at IS NOT NULL",
+                "SELECT count(*) FROM auth_sessions WHERE jti_hash = %s AND revoked_at IS NOT NULL",
                 (_jti_hash_of(bag["result"].refresh_token),),
             )
         assert int(n or 0) == 1
@@ -295,9 +288,7 @@ async def test_cross_user_settings_default_denied() -> None:
             # A-scoped context attempts a settings row attributed to B -> WITH CHECK rejects.
             with pytest.raises(psycopg.errors.InsufficientPrivilege):
                 async with DbContext(conn_a, bag_a["result"].id).transaction() as db:
-                    await AuthRepository(db).upsert_setting(
-                        bag_b["result"].id, "notifications_enabled", True
-                    )
+                    await AuthRepository(db).upsert_setting(bag_b["result"].id, "notifications_enabled", True)
         finally:
             await conn_b.close()
     finally:
@@ -311,15 +302,11 @@ async def test_settings_defaults_merge_and_update() -> None:
         svc = SettingsService(conn)
         user_id = bag["result"].id
         assert await svc.get(user_id=user_id) == EXPECTED_DEFAULTS
-        merged = await svc.update(
-            user_id=user_id, updates={"chat_mode": "agent", "auto_approve_threshold": 55}
-        )
+        merged = await svc.update(user_id=user_id, updates={"chat_mode": "agent", "auto_approve_threshold": 55})
         assert merged == {**EXPECTED_DEFAULTS, "chat_mode": "agent", "auto_approve_threshold": 55}
         async with DbContext(conn, user_id).transaction() as db:
             rows = await AuthRepository(db).get_settings(user_id)
-            n_audit = await db.fetch_scalar(
-                "SELECT count(*) FROM audit_logs WHERE action = 'settings_updated'"
-            )
+            n_audit = await db.fetch_scalar("SELECT count(*) FROM audit_logs WHERE action = 'settings_updated'")
         assert len(rows) == 3  # chat_mode + theme seeds, auto_approve_threshold added
         assert int(n_audit or 0) == 1
     finally:
@@ -386,18 +373,16 @@ async def test_user_profile_created_then_updated() -> None:
             user_id=user_id,
             fields={"phone": "+1 555 0199", "state": "CA", "github_url": None},
         )
-        assert updated["phone"] == "+1 555 0199"    # changed in place
-        assert updated["state"] == "CA"             # added on update
-        assert updated["github_url"] is None        # cleared to NULL
-        assert updated["city"] == "Austin"          # preserved across upsert
+        assert updated["phone"] == "+1 555 0199"  # changed in place
+        assert updated["state"] == "CA"  # added on update
+        assert updated["github_url"] is None  # cleared to NULL
+        assert updated["city"] == "Austin"  # preserved across upsert
         assert updated["linkedin_url"] == "https://li/x"
         assert updated["custom_fields"] == {"referral": "linkedin", "years_experience": 7}
         assert updated["created_at"] == created_at  # same row, updated not re-inserted
         assert updated["updated_at"] >= created_at
         async with DbContext(conn, user_id).transaction() as db:
-            cursor = await db.execute(
-                "SELECT action FROM audit_logs WHERE resource_type = 'user_profile'"
-            )
+            cursor = await db.execute("SELECT action FROM audit_logs WHERE resource_type = 'user_profile'")
             actions = [row[0] for row in await cursor.fetchall()]
         assert sorted(actions) == ["user_profile_created", "user_profile_updated"]
     finally:
@@ -408,9 +393,7 @@ async def test_user_profile_rejects_unknown_field() -> None:
     conn, bag = await _register()
     try:
         with pytest.raises(ValidationError) as exc:
-            await UserProfileService(conn).update(
-                user_id=bag["result"].id, fields={"bogus_field": 1}
-            )
+            await UserProfileService(conn).update(user_id=bag["result"].id, fields={"bogus_field": 1})
         assert exc.value.code == "VALIDATION_ERROR"
         assert exc.value.status == 422
     finally:
@@ -442,9 +425,9 @@ async def test_login_sec_def_lookup() -> None:
 
         # (3) function is STABLE + SECURITY DEFINER and EXECUTE is granted to app_user.
         async with DbContext(conn_b, bag_b["result"].id).transaction() as db:
-            proc = await (await db.execute(
-                "SELECT prosecdef, provolatile FROM pg_proc WHERE proname = 'auth_user_by_email'"
-            )).fetchone()
+            proc = await (
+                await db.execute("SELECT prosecdef, provolatile FROM pg_proc WHERE proname = 'auth_user_by_email'")
+            ).fetchone()
             granted = await db.fetch_scalar(
                 "SELECT has_function_privilege('app_user', 'auth_user_by_email(text)', 'EXECUTE')"
             )
@@ -476,9 +459,7 @@ async def test_auth_audit_actions_exactly_canonical() -> None:
         await SettingsService(conn).update(user_id=user_id, updates={"theme": "light"})
 
         profile = UserProfileService(conn)
-        await profile.update(
-            user_id=user_id, fields={"phone": "+1 555 0100", "city": "Austin"}
-        )
+        await profile.update(user_id=user_id, fields={"phone": "+1 555 0100", "city": "Austin"})
         await profile.update(user_id=user_id, fields={"linkedin_url": "https://li/x"})
 
         async with DbContext(conn, user_id).transaction() as db:
@@ -507,17 +488,15 @@ async def test_api_key_create_lookup_touch_revoke() -> None:
         user_id = bag["result"].id
         expires = datetime.now(UTC) + timedelta(days=30)
         async with DbContext(conn, user_id).transaction() as db:
-            created = await AuthRepository(db).create_api_key(
-                user_id=user_id, name="cli", expires_at=expires
-            )
+            created = await AuthRepository(db).create_api_key(user_id=user_id, name="cli", expires_at=expires)
         assert created["prefix"].startswith("aa_")
         assert created["secret"].startswith(f"{user_id}:")
         assert created["key_hash"] == sha256_hex(created["secret"])
         assert created["expires_at"] == expires
-        assert created["secret"] != created["key_hash"]          # plaintext never stored
+        assert created["secret"] != created["key_hash"]  # plaintext never stored
 
         wrong_secret = "someone-else-secret"
-        assert sha256_hex(wrong_secret) != created["key_hash"]   # non-matching secret fails
+        assert sha256_hex(wrong_secret) != created["key_hash"]  # non-matching secret fails
 
         async with DbContext(conn, user_id).transaction() as db:
             row = await AuthRepository(db).find_api_key_by_prefix(created["prefix"])
@@ -545,9 +524,7 @@ async def test_api_key_cross_user_scope_and_unknown_prefix() -> None:
     conn_b, bag_b = await _register()
     try:
         async with DbContext(conn_a, bag_a["result"].id).transaction() as db:
-            created = await AuthRepository(db).create_api_key(
-                user_id=bag_a["result"].id, name="a"
-            )
+            created = await AuthRepository(db).create_api_key(user_id=bag_a["result"].id, name="a")
         async with DbContext(conn_a, bag_a["result"].id).transaction() as db:
             assert await AuthRepository(db).find_api_key_by_prefix("aa_unknown") is None
         async with DbContext(conn_b, bag_b["result"].id).transaction() as db:

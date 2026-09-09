@@ -52,9 +52,7 @@ def verify_password(password: str, password_hash: str, *, dummy: bool = False) -
 
 def check_password_policy(password: str) -> None:
     if not _PASSWORD_POLICY.match(password):
-        raise WeakPasswordError(
-            "password must be 8+ chars with an upper, lower, digit, and special char"
-        )
+        raise WeakPasswordError("password must be 8+ chars with an upper, lower, digit, and special char")
 
 
 def _encode(payload: dict[str, Any], ttl: dt.timedelta) -> str:

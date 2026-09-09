@@ -50,13 +50,9 @@ class DbContext:
         value = str(self.user_id) if self.user_id is not None else NO_USER
         await self.conn.execute("SELECT set_config('app.user_id', %s, true)", (value,))
 
-    async def execute(
-        self, query: str, params: Sequence[Any] | None = None
-    ) -> psycopg.AsyncCursor[tuple[Any, ...]]:
+    async def execute(self, query: str, params: Sequence[Any] | None = None) -> psycopg.AsyncCursor[tuple[Any, ...]]:
         return await self.conn.execute(query, params)
 
-    async def fetch_scalar(
-        self, query: str, params: Sequence[Any] | None = None
-    ) -> Any:
+    async def fetch_scalar(self, query: str, params: Sequence[Any] | None = None) -> Any:
         row = await (await self.conn.execute(query, params)).fetchone()
         return row[0] if row else None

@@ -61,21 +61,15 @@ def test_ownership_map_is_complete_and_consistent() -> None:
     declared: set[str] = set()
     for _name, src in sources.items():
         declared |= _owned_tables(src)
-    assert declared == set(OWNERSHIP), (
-        f"ownership drift: repo-declared={sorted(declared)} vs map={sorted(OWNERSHIP)}"
-    )
+    assert declared == set(OWNERSHIP), f"ownership drift: repo-declared={sorted(declared)} vs map={sorted(OWNERSHIP)}"
     for owner, src in sources.items():
         assigned = {t for t, o in OWNERSHIP.items() if o == owner}
-        assert _owned_tables(src) == assigned, (
-            f"{owner}: owns {sorted(_owned_tables(src))} != map {sorted(assigned)}"
-        )
+        assert _owned_tables(src) == assigned, f"{owner}: owns {sorted(_owned_tables(src))} != map {sorted(assigned)}"
 
 
 def test_owner_classes_are_unique_and_cover_the_map() -> None:
     owners = set(OWNERSHIP.values())
-    assert owners == set(_CLASS_FILE), (
-        f"owners in map ({sorted(owners)}) != repo classes ({sorted(_CLASS_FILE)})"
-    )
+    assert owners == set(_CLASS_FILE), f"owners in map ({sorted(owners)}) != repo classes ({sorted(_CLASS_FILE)})"
 
 
 def test_no_table_used_outside_its_owner() -> None:
@@ -88,6 +82,4 @@ def test_no_table_used_outside_its_owner() -> None:
         for other_name, other_src in sources.items():
             if other_name == owner:
                 continue
-            assert not needle.search(_code_only(other_src)), (
-                f"{other_name} uses {table!r} in code but {owner} owns it"
-            )
+            assert not needle.search(_code_only(other_src)), f"{other_name} uses {table!r} in code but {owner} owns it"

@@ -12,9 +12,7 @@ from db.run_migrations import (
 )
 from tests.parity import schema_parity
 
-ADMIN_URL = os.getenv(
-    "MIGRATE_DATABASE_URL", "postgresql://autoapply:autoapply@localhost:5432/autoapply"
-)
+ADMIN_URL = os.getenv("MIGRATE_DATABASE_URL", "postgresql://autoapply:autoapply@localhost:5432/autoapply")
 SCRATCH_DB = "autoapply_ci_scratch"
 
 
@@ -88,8 +86,7 @@ def test_job_snapshots_columns_and_unique_hash() -> None:
             ).fetchall()
         }
         unique = conn.execute(
-            "SELECT count(*) FROM pg_constraint "
-            "WHERE conrelid = 'job_snapshots'::regclass AND contype = 'u'"
+            "SELECT count(*) FROM pg_constraint WHERE conrelid = 'job_snapshots'::regclass AND contype = 'u'"
         ).fetchone()[0]
     assert cols == {"id", "content_hash", "payload", "captured_at"}
     assert "user_id" not in cols  # shared cache invariant: no owner column
@@ -118,9 +115,7 @@ def test_checkpoint_step_enum_is_exact() -> None:
             "SELECT pg_get_constraintdef(oid) FROM pg_constraint "
             "WHERE conrelid = 'checkpoints'::regclass AND contype = 'c'"
         ).fetchall()
-    step_def = next(
-        d[0] for d in defs if "'jd_extraction'" in d[0] and "'rubric_generation'" in d[0]
-    )
+    step_def = next(d[0] for d in defs if "'jd_extraction'" in d[0] and "'rubric_generation'" in d[0])
     expected = {"jd_extraction", "rubric_generation", "scoring", "optimization", "package_generation"}
     for value in expected:
         assert f"'{value}'" in step_def
@@ -130,8 +125,7 @@ def test_checkpoint_step_enum_is_exact() -> None:
 def test_index_count_39() -> None:
     with psycopg.connect(ADMIN_URL) as conn:
         count = conn.execute(
-            "SELECT count(*) FROM pg_indexes "
-            "WHERE schemaname = 'public' AND indexname LIKE 'idx\\_%'"
+            "SELECT count(*) FROM pg_indexes WHERE schemaname = 'public' AND indexname LIKE 'idx\\_%'"
         ).fetchone()[0]
     assert count == 39
 
@@ -141,8 +135,7 @@ def test_snapshot_fks_on_applications_and_jobs() -> None:
         refs = {
             row[0]
             for row in conn.execute(
-                "SELECT conname FROM pg_constraint "
-                "WHERE confrelid = 'job_snapshots'::regclass"
+                "SELECT conname FROM pg_constraint WHERE confrelid = 'job_snapshots'::regclass"
             ).fetchall()
         }
         jobs_snapshot_col = conn.execute(

@@ -40,9 +40,7 @@ class AuthRepository(BaseRepository):
     owns = frozenset({"users", "api_keys", "settings", "user_profiles", "auth_sessions"})
 
     # ------------------------------------------------------------------ users
-    async def create_user(
-        self, *, id: uuid.UUID, email: str, password_hash: str, name: str
-    ) -> Any:
+    async def create_user(self, *, id: uuid.UUID, email: str, password_hash: str, name: str) -> Any:
         """Insert a user with an explicit pre-generated id (D6, FORCE-RLS-safe)."""
         return await self.insert(
             "users",
@@ -52,17 +50,14 @@ class AuthRepository(BaseRepository):
 
     async def get_user_by_id(self, user_id: uuid.UUID) -> dict[str, Any] | None:
         cur = await self.db.execute(
-            "SELECT id, email, password_hash, name, created_at, updated_at "
-            "FROM users WHERE id = %s",
+            "SELECT id, email, password_hash, name, created_at, updated_at FROM users WHERE id = %s",
             (str(user_id),),
         )
         return _row(await cur.fetchone(), _USER_COLUMNS)
 
     async def find_by_email(self, email: str) -> dict[str, Any] | None:
         """D10: SECURITY DEFINER lookup — the only RLS-free path into ``users``."""
-        cur = await self.db.execute(
-            "SELECT id, email, password_hash, name FROM auth_user_by_email(%s)", (email,)
-        )
+        cur = await self.db.execute("SELECT id, email, password_hash, name FROM auth_user_by_email(%s)", (email,))
         return _row(await cur.fetchone(), _USER_COLUMNS[:4])
 
     # --------------------------------------------------------------- settings
@@ -138,14 +133,10 @@ class AuthRepository(BaseRepository):
         return cur.rowcount > 0
 
     async def touch_api_key(self, api_key_id: uuid.UUID) -> None:
-        await self.db.execute(
-            "UPDATE api_keys SET last_used_at = NOW() WHERE id = %s", (str(api_key_id),)
-        )
+        await self.db.execute("UPDATE api_keys SET last_used_at = NOW() WHERE id = %s", (str(api_key_id),))
 
     # ---------------------------------------------------------- auth_sessions
-    async def insert_session(
-        self, user_id: uuid.UUID, jti_hash: str, expires_at: dt.datetime
-    ) -> Any:
+    async def insert_session(self, user_id: uuid.UUID, jti_hash: str, expires_at: dt.datetime) -> Any:
         return await self.insert(
             "auth_sessions",
             {"user_id": user_id, "jti_hash": jti_hash, "expires_at": expires_at},
@@ -162,9 +153,7 @@ class AuthRepository(BaseRepository):
         return cur.rowcount > 0
 
     async def count_sessions(self, user_id: uuid.UUID) -> int:
-        value = await self.db.fetch_scalar(
-            "SELECT count(*) FROM auth_sessions WHERE user_id = %s", (str(user_id),)
-        )
+        value = await self.db.fetch_scalar("SELECT count(*) FROM auth_sessions WHERE user_id = %s", (str(user_id),))
         return int(value or 0)
 
     # ---------------------------------------------------------- user_profiles
@@ -180,10 +169,26 @@ class AuthRepository(BaseRepository):
         if row is None:
             return None
         cols = (
-            "id", "user_id", "phone", "linkedin_url", "github_url", "website_url",
-            "address", "city", "state", "country", "postal_code", "date_of_birth",
-            "gender", "ethnicity", "veteran_status", "disability_status",
-            "work_authorization", "custom_fields", "created_at", "updated_at",
+            "id",
+            "user_id",
+            "phone",
+            "linkedin_url",
+            "github_url",
+            "website_url",
+            "address",
+            "city",
+            "state",
+            "country",
+            "postal_code",
+            "date_of_birth",
+            "gender",
+            "ethnicity",
+            "veteran_status",
+            "disability_status",
+            "work_authorization",
+            "custom_fields",
+            "created_at",
+            "updated_at",
         )
         return {name: value for name, value in zip(cols, row, strict=False)}
 
@@ -193,8 +198,7 @@ class AuthRepository(BaseRepository):
     async def update_profile(self, user_id: uuid.UUID, fields: dict[str, Any]) -> bool:
         assignments = ", ".join(f"{column} = %s" for column in fields)
         cur = await self.db.execute(
-            f"UPDATE user_profiles SET {assignments}, updated_at = NOW() "
-            "WHERE user_id = %s",
+            f"UPDATE user_profiles SET {assignments}, updated_at = NOW() WHERE user_id = %s",
             [self._dump(v) for v in fields.values()] + [str(user_id)],
         )
         return cur.rowcount > 0

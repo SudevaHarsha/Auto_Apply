@@ -46,18 +46,14 @@ class UserProfileService:
         async with db.transaction():
             return await AuthRepository(db).get_profile(user_id)
 
-    async def update(
-        self, *, user_id: uuid.UUID, fields: dict[str, Any]
-    ) -> dict[str, Any]:
+    async def update(self, *, user_id: uuid.UUID, fields: dict[str, Any]) -> dict[str, Any]:
         unknown = [key for key in fields if key not in _SCALAR_FIELDS and key != "custom_fields"]
         if unknown:
             raise ValidationError("unknown profile field", details={"keys": unknown})
         scalars = {key: fields[key] for key in fields if key in _SCALAR_FIELDS}
         custom = fields.get("custom_fields")
         if custom is not None and not isinstance(custom, dict):
-            raise SettingsValueInvalidError(
-                "custom_fields must be a JSON object", details={"custom_fields": custom}
-            )
+            raise SettingsValueInvalidError("custom_fields must be a JSON object", details={"custom_fields": custom})
         inserts = dict(scalars, custom_fields=custom) if custom is not None else scalars
 
         db = DbContext(self.conn, user_id=user_id)

@@ -32,7 +32,7 @@ class BaseRepository:
     @staticmethod
     def _dump(value: Any) -> Any:
         """Wrap dict/list as jsonb for psycopg3 so JSON columns serialize correctly."""
-        if isinstance(value, (dict, list)):
+        if isinstance(value, dict | list):
             return Jsonb(value)
         return value
 
@@ -69,7 +69,5 @@ class BaseRepository:
 
     async def exists(self, table: str, id_col: str, value: uuid.UUID | str) -> bool:
         self._check(table)
-        n = await self.db.fetch_scalar(
-            f"SELECT count(*) FROM {table} WHERE {id_col} = %s", (str(value),)
-        )
+        n = await self.db.fetch_scalar(f"SELECT count(*) FROM {table} WHERE {id_col} = %s", (str(value),))
         return bool(n)

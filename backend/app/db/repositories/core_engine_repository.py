@@ -13,13 +13,9 @@ from backend.app.db.repositories.base import BaseRepository
 class CoreEngineRepository(BaseRepository):
     """core_engine owns profile/job/application/pipeline data plus the shared job_snapshots cache."""
 
-    owns = frozenset(
-        {"profiles", "jobs", "applications", "pipeline_runs", "job_snapshots"}
-    )
+    owns = frozenset({"profiles", "jobs", "applications", "pipeline_runs", "job_snapshots"})
 
-    async def upsert_snapshot(
-        self, content_hash: str, payload: dict[str, Any]
-    ) -> uuid.UUID:
+    async def upsert_snapshot(self, content_hash: str, payload: dict[str, Any]) -> uuid.UUID:
         """Shared, concurrency-safe snapshot write (I1/I4).
 
         ``job_snapshots`` is RLS-exempt (no ``user_id``). Unique ``content_hash`` means N
@@ -38,9 +34,7 @@ class CoreEngineRepository(BaseRepository):
         if row is not None:
             return row[0]
         got = await (
-            await self.db.execute(
-                "SELECT id FROM job_snapshots WHERE content_hash = %s", (content_hash,)
-            )
+            await self.db.execute("SELECT id FROM job_snapshots WHERE content_hash = %s", (content_hash,))
         ).fetchone()
         if got is None:  # pragma: no cover - defensive
             raise RuntimeError(f"snapshot {content_hash!r} vanished between insert and select")
