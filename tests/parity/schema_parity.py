@@ -32,7 +32,7 @@ from typing import Any
 import psycopg
 
 REPO = Path(__file__).resolve().parents[2]
-DOCS_SCHEMA = REPO.parent / "docs" / "database" / "schema.md"
+DOCS_SCHEMA = REPO / "docs" / "database" / "schema.md"
 GOLDEN = REPO / "tests" / "parity" / "golden" / "schema_golden.sql"
 COMPOSE = REPO / os.getenv("PARITY_COMPOSE", "infra/docker-compose.dev.yml")
 DB_SERVICE = os.getenv("PARITY_DB_SERVICE", "db")
@@ -62,9 +62,22 @@ _RE_FORCE = re.compile(r"^ALTER TABLE (\w+) FORCE ROW LEVEL SECURITY", re.M)
 def dump_schema() -> str:
     """pg_dump the live schema (schema-only, no owner/privileges) via the db container."""
     result = subprocess.run(
-        ["docker", "compose", "-f", str(COMPOSE), "exec", "-T", DB_SERVICE,
-         "pg_dump", "-U", "autoapply", "--schema-only", "--no-owner", "--no-privileges",
-         "autoapply"],
+        [
+            "docker",
+            "compose",
+            "-f",
+            str(COMPOSE),
+            "exec",
+            "-T",
+            DB_SERVICE,
+            "pg_dump",
+            "-U",
+            "autoapply",
+            "--schema-only",
+            "--no-owner",
+            "--no-privileges",
+            "autoapply",
+        ],
         capture_output=True,
         text=True,
         encoding="utf-8",
@@ -136,10 +149,7 @@ def live_catalog(url: str | None = None) -> dict[str, Any]:
     with psycopg.connect(url) as conn, conn.cursor() as cur:
         cur.execute("SELECT tablename FROM pg_tables WHERE schemaname = 'public'")
         tables = {row[0] for row in cur.fetchall()}
-        cur.execute(
-            "SELECT indexname FROM pg_indexes "
-            "WHERE schemaname = 'public' AND indexname LIKE 'idx\\_%'"
-        )
+        cur.execute("SELECT indexname FROM pg_indexes WHERE schemaname = 'public' AND indexname LIKE 'idx\\_%'")
         indexes = {row[0] for row in cur.fetchall()}
         cur.execute(
             "SELECT c.relname, c.relrowsecurity, c.relforcerowsecurity "
@@ -179,23 +189,15 @@ def docs_matcher(url: str | None = None) -> dict[str, Any]:
     errors: list[str] = []
 
     if live["tables"] != doc["tables"]:
-        errors.append(
-            f"tables: docs={sorted(doc['tables'])} live={sorted(live['tables'])}"
-        )
+        errors.append(f"tables: docs={sorted(doc['tables'])} live={sorted(live['tables'])}")
     if live["indexes"] != doc["indexes"]:
-        errors.append(
-            f"idx_ indexes: docs={sorted(doc['indexes'])} live={sorted(live['indexes'])}"
-        )
+        errors.append(f"idx_ indexes: docs={sorted(doc['indexes'])} live={sorted(live['indexes'])}")
 
     expected_enabled = (doc["enables"] | set(DIVERGENCE_D4_EXTRA_POLICIES)) - RLS_EXEMPT
     if live["enables"] != expected_enabled:
-        errors.append(
-            f"RLS enabled: docs+{sorted(expected_enabled)} live={sorted(live['enables'])}"
-        )
+        errors.append(f"RLS enabled: docs+{sorted(expected_enabled)} live={sorted(live['enables'])}")
     if live["forces"] != doc["forces"]:
-        errors.append(
-            f"RLS forced: docs={sorted(doc['forces'])} live={sorted(live['forces'])}"
-        )
+        errors.append(f"RLS forced: docs={sorted(doc['forces'])} live={sorted(live['forces'])}")
     if live["policy_tables"] != expected_enabled:
         errors.append(
             f"policy-carrying tables != RLS tables: "
@@ -226,8 +228,7 @@ def compare(url: str | None = None) -> dict[str, Any]:
 def main() -> int:
     result = compare()
     report_lines = [
-        "schema parity: "
-        + ("PASS" if result["ok"] else "FAIL"),
+        "schema parity: " + ("PASS" if result["ok"] else "FAIL"),
     ]
     if result["ok"]:
         print("\n".join(report_lines))
