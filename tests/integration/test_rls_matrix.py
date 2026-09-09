@@ -12,6 +12,7 @@ test-integration`` is loaded from ``.env.test`` and therefore points at the isol
 from __future__ import annotations
 
 import asyncio
+import datetime as dt
 import os
 import uuid
 
@@ -107,6 +108,7 @@ TABLE_INSERTS: dict[str, tuple[str, list[str]]] = {
     "error_logs": ("user_id", ["component", "error_type", "severity", "message"]),
     "settings": ("user_id", ["key", "value"]),
     "user_profiles": ("user_id", ["phone"]),
+    "auth_sessions": ("user_id", ["jti_hash", "expires_at"]),
     "job_snapshots": ("__exempt__", ["content_hash", "payload"]),  # shared, no scoping
 }
 
@@ -128,6 +130,7 @@ _DEFAULT_SCOPED_COLUMNS: dict[str, dict[str, object]] = {
     "error_logs": {"component": "c", "error_type": "e", "severity": "LOW", "message": "m"},
     "settings": {"key": "k", "value": {}},
     "user_profiles": {"phone": "1"},
+    "auth_sessions": {"jti_hash": "j", "expires_at": dt.datetime(2121, 1, 1, tzinfo=dt.UTC)},
 }
 
 

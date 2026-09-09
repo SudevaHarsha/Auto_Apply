@@ -31,11 +31,11 @@ def summary() -> dict:
 
 
 def test_migration_apply_and_verify(summary: dict) -> None:
-    assert summary["tables"] == 20
-    assert summary["indexes"] == 37
-    assert summary["rls_enabled"] == 19
-    assert summary["rls_forced"] == 19
-    assert summary["policies"] == 21
+    assert summary["tables"] == 21  # +026 auth_sessions
+    assert summary["indexes"] == 39  # +2 idx_auth_sessions_*
+    assert summary["rls_enabled"] == 20
+    assert summary["rls_forced"] == 20
+    assert summary["policies"] == 22
 
 
 def test_app_user_role_exists() -> None:
@@ -52,9 +52,9 @@ def test_migrations_apply_twice_on_fresh_db() -> None:
             admin.execute(f"DROP DATABASE IF EXISTS {SCRATCH_DB} WITH (FORCE)")
             admin.execute(f"CREATE DATABASE {SCRATCH_DB}")
             applied, summary = migrate(scratch_url)
-            assert len(applied) == 25
-            assert summary["tables"] == 20
-            assert summary["policies"] == 21
+            assert len(applied) == 26  # 001..026
+            assert summary["tables"] == 21
+            assert summary["policies"] == 22
     finally:
         admin.execute(f"DROP DATABASE IF EXISTS {SCRATCH_DB} WITH (FORCE)")
         admin.close()
@@ -70,9 +70,10 @@ def test_rls_forced_19_and_snapshots_are_exempt() -> None:
     rls = {name: (en, fo) for name, en, fo in rows}
     enabled = {t for t, (e, _) in rls.items() if e}
     forced = {t for t, (_, f) in rls.items() if f}
-    assert len(enabled) == 19
-    assert len(forced) == 19
+    assert len(enabled) == 20
+    assert len(forced) == 20
     assert "user_profiles" in forced  # D4/D2: FORCE + policy present
+    assert "auth_sessions" in forced  # 026: same tenant-scope contract
     assert "job_snapshots" not in enabled
     assert "job_snapshots" not in forced
 
@@ -126,13 +127,13 @@ def test_checkpoint_step_enum_is_exact() -> None:
     assert step_def.count("'") // 2 == len(expected), "unexpected extra step literals"
 
 
-def test_index_count_37() -> None:
+def test_index_count_39() -> None:
     with psycopg.connect(ADMIN_URL) as conn:
         count = conn.execute(
             "SELECT count(*) FROM pg_indexes "
             "WHERE schemaname = 'public' AND indexname LIKE 'idx\\_%'"
         ).fetchone()[0]
-    assert count == 37
+    assert count == 39
 
 
 def test_snapshot_fks_on_applications_and_jobs() -> None:

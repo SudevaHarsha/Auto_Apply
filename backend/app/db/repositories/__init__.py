@@ -34,6 +34,7 @@ OWNERSHIP: dict[str, str] = {
     "api_keys": "AuthRepository",
     "settings": "AuthRepository",
     "user_profiles": "AuthRepository",
+    "auth_sessions": "AuthRepository",
     "profiles": "CoreEngineRepository",
     "jobs": "CoreEngineRepository",
     "applications": "CoreEngineRepository",
