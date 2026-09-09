@@ -120,9 +120,7 @@ class AuthService:
             access = create_access_token(user_id, email)
             refresh, jti = create_refresh_token(user_id)
             await repo.insert_session(user_id, sha256_hex(jti), _session_expiry())
-        return AuthResult(
-            id=user_id, email=email, name=name, access_token=access, refresh_token=refresh
-        )
+        return AuthResult(id=user_id, email=email, name=name, access_token=access, refresh_token=refresh)
 
     # --------------------------------------------------------------------- login
     async def login(

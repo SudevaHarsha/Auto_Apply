@@ -27,8 +27,10 @@ def parity() -> dict:
 def test_parity_passes(parity: dict) -> None:
     assert parity["ok"], "\n".join(parity["problems"])
 
+
 def test_golden_dump_committed() -> None:
     assert schema_parity.GOLDEN.is_file()
+
 
 def test_docs_anchor_available() -> None:
     assert schema_parity.DOCS_SCHEMA.is_file()

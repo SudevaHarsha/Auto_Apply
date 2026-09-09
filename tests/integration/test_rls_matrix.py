@@ -27,9 +27,7 @@ from backend.app.db.repositories import (
     LlmRouterRepository,
 )
 
-APP_URL = os.getenv(
-    "DATABASE_URL", "postgresql://app_user:changeme_in_production@localhost:5432/autoapply"
-)
+APP_URL = os.getenv("DATABASE_URL", "postgresql://app_user:changeme_in_production@localhost:5432/autoapply")
 
 
 async def _connect() -> psycopg.AsyncConnection:
@@ -69,16 +67,28 @@ async def world() -> dict:
             )
             parents["job"] = await core.insert(
                 "jobs",
-                {"user_id": a, "title": "Engineer", "company": "Acme", "url": f"url-{a}",
-                 "platform": "greenhouse", "source": "manual"},
+                {
+                    "user_id": a,
+                    "title": "Engineer",
+                    "company": "Acme",
+                    "url": f"url-{a}",
+                    "platform": "greenhouse",
+                    "source": "manual",
+                },
             )
             parents["llm_provider"] = await llm.insert(
                 "llm_providers", {"user_id": a, "name": "gemini", "base_url": "https://x", "model": "m"}
             )
             parents["application"] = await core.insert(
                 "applications",
-                {"user_id": a, "job_id": parents["job"], "profile_id": parents["profile"],
-                 "optimized_resume": {"o": 1}, "pdf_url": "app-a.pdf", "field_mappings": {"f": 1}},
+                {
+                    "user_id": a,
+                    "job_id": parents["job"],
+                    "profile_id": parents["profile"],
+                    "optimized_resume": {"o": 1},
+                    "pdf_url": "app-a.pdf",
+                    "field_mappings": {"f": 1},
+                },
             )
     finally:
         await conn.close()
@@ -147,6 +157,7 @@ def _repo(db: DbContext, table: str):
         LlmRouterRepository,
         ObservabilityRepository,
     )
+
     cls = {
         "AuthRepository": AuthRepository,
         "CheckpointingRepository": CheckpointingRepository,
@@ -302,14 +313,26 @@ async def test_context_transaction_rollback(world: dict) -> None:
             async with db.transaction():
                 await core.insert(
                     "jobs",
-                    {"user_id": a, "title": "Bad", "company": "Co", "url": "bad-url",
-                     "platform": "greenhouse", "source": "manual"},
+                    {
+                        "user_id": a,
+                        "title": "Bad",
+                        "company": "Co",
+                        "url": "bad-url",
+                        "platform": "greenhouse",
+                        "source": "manual",
+                    },
                 )
                 # Violates platform CHECK -> whole transaction rolls back (S2 rollback semantics).
                 await core.insert(
                     "jobs",
-                    {"user_id": a, "title": "Bad", "company": "Co", "url": "bad-url-2",
-                     "platform": "not-a-platform", "source": "manual"},
+                    {
+                        "user_id": a,
+                        "title": "Bad",
+                        "company": "Co",
+                        "url": "bad-url-2",
+                        "platform": "not-a-platform",
+                        "source": "manual",
+                    },
                 )
         async with db.transaction():
             # Neither row survived the aborted transaction (RLS-scoped, URL-specific proof).
@@ -339,9 +362,7 @@ async def test_concurrent_same_snapshot(world: dict) -> None:
     conn = await _connect()
     try:
         async with DbContext(conn, None).transaction() as db:
-            n_rows = await db.fetch_scalar(
-                "SELECT count(*) FROM job_snapshots WHERE content_hash = %s", ("race-hash",)
-            )
+            n_rows = await db.fetch_scalar("SELECT count(*) FROM job_snapshots WHERE content_hash = %s", ("race-hash",))
         assert int(n_rows or 0) == 1
     finally:
         await conn.close()

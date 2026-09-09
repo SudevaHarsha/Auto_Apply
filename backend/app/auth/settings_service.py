@@ -43,9 +43,7 @@ def _validate_int_ranged(min_value: int, max_value: int):
 def _validate_choice(*choices: str):
     def _check(value: Any) -> str:
         if not isinstance(value, str) or value not in choices:
-            raise SettingsValueInvalidError(
-                f"value must be one of {choices}", details={"value": value}
-            )
+            raise SettingsValueInvalidError(f"value must be one of {choices}", details={"value": value})
         return value
 
     return _check
@@ -58,9 +56,7 @@ def _validate_bool(value: Any) -> bool:
 
 
 def _validate_llm_chain(value: Any) -> list[str]:
-    if not isinstance(value, list) or not value or not all(
-        isinstance(v, str) and v in _LLM_PROVIDERS for v in value
-    ):
+    if not isinstance(value, list) or not value or not all(isinstance(v, str) and v in _LLM_PROVIDERS for v in value):
         raise SettingsValueInvalidError(
             "llm_chain must be a non-empty list of known providers",
             details={"value": value},
@@ -76,9 +72,7 @@ SETTINGS_SPEC: dict[str, tuple[Any, Any]] = {
     "llm_chain": (_validate_llm_chain, ["gemini", "ollama", "groq", "openrouter"]),
 }
 
-SETTINGS_SPEC_NAMES_WITH_DEFAULTS: dict[str, Any] = {
-    key: spec[1] for key, spec in SETTINGS_SPEC.items()
-}
+SETTINGS_SPEC_NAMES_WITH_DEFAULTS: dict[str, Any] = {key: spec[1] for key, spec in SETTINGS_SPEC.items()}
 
 
 class SettingsService:
@@ -95,14 +89,10 @@ class SettingsService:
                 merged[key] = value
         return merged
 
-    async def update(
-        self, *, user_id: uuid.UUID, updates: dict[str, Any]
-    ) -> dict[str, Any]:
+    async def update(self, *, user_id: uuid.UUID, updates: dict[str, Any]) -> dict[str, Any]:
         unknown = [key for key in updates if key not in SETTINGS_SPEC]
         if unknown:
-            raise SettingsKeyInvalidError(
-                "unknown settings key", details={"keys": unknown}
-            )
+            raise SettingsKeyInvalidError("unknown settings key", details={"keys": unknown})
         validated: dict[str, Any] = {}
         for key, validator in ((k, SETTINGS_SPEC[k][0]) for k in updates):
             try:

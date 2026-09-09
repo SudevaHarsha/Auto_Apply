@@ -121,10 +121,7 @@ def main() -> int:
         print(f"FAILED: {exc}", file=sys.stderr)
         return 1
     print(f"applied {len(applied)} migrations: {', '.join(applied)}")
-    print(
-        "verify: "
-        + ", ".join(f"{k}={v}" for k, v in summary.items() if k != "forced_tables")
-    )
+    print("verify: " + ", ".join(f"{k}={v}" for k, v in summary.items() if k != "forced_tables"))
     return 0
 
 
