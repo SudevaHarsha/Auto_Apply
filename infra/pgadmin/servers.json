@@ -1,10 +1,10 @@
 {
   "Servers": {
     "1": {
-      "Name": "Dev DB (host 5434)",
+      "Name": "Dev DB (host 5432)",
       "Group": "AutoApply",
       "Host": "host.docker.internal",
-      "Port": 5434,
+      "Port": 5432,
       "Username": "autoapply",
       "SSLMode": "prefer",
       "MaintenanceDB": "postgres"
