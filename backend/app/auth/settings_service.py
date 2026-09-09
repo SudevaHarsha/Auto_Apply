@@ -73,7 +73,7 @@ SETTINGS_SPEC: dict[str, tuple[Any, Any]] = {
     "theme": (_validate_choice("dark", "light"), "dark"),
     "auto_approve_threshold": (_validate_int_ranged(0, 100), 80),
     "notifications_enabled": (_validate_bool, True),
-    "llm_chain": (_validate_llm_chain, ["gemini"]),
+    "llm_chain": (_validate_llm_chain, ["gemini", "ollama", "groq", "openrouter"]),
 }
 
 SETTINGS_SPEC_NAMES_WITH_DEFAULTS: dict[str, Any] = {

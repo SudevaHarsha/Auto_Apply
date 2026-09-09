@@ -285,14 +285,15 @@ SELECT count(*) AS prefix_lookup FROM api_keys WHERE prefix = 'nope';
 
 -- 7.1 SETTINGS GET SUCCESS — defaults UNION stored rows. Without any stored value a
 --     key resolves to its §17 default: chat_mode=bot, theme=dark,
---     auto_approve_threshold=80, notifications_enabled=true, llm_chain=[gemini].
+--     auto_approve_threshold=80, notifications_enabled=true,
+--     llm_chain=[gemini,ollama,groq,openrouter].
 SELECT d.key, COALESCE(s.value, d.default_value) AS resolved
 FROM (VALUES
         ('chat_mode',              '"bot"'::jsonb),
         ('theme',                  '"dark"'::jsonb),
         ('auto_approve_threshold', '80'::jsonb),
         ('notifications_enabled',  'true'::jsonb),
-        ('llm_chain',              '["gemini"]'::jsonb)
+        ('llm_chain',              '["gemini","ollama","groq","openrouter"]'::jsonb)
      ) d(key, default_value)
 LEFT JOIN settings s ON s.user_id = :'id_a'::uuid AND s.key = d.key
 ORDER BY d.key;
