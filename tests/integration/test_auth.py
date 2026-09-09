@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import os
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime, timedelta
 
 import jwt
 import psycopg
@@ -54,7 +54,7 @@ EXPECTED_DEFAULTS = {
     "theme": "dark",
     "auto_approve_threshold": 80,
     "notifications_enabled": True,
-    "llm_chain": ["gemini"],
+    "llm_chain": ["gemini", "ollama", "groq", "openrouter"],
 }
 
 
@@ -356,11 +356,44 @@ async def test_user_profile_created_then_updated() -> None:
         user_id = bag["result"].id
         assert await svc.get(user_id=user_id) is None
         created = await svc.update(
-            user_id=user_id, fields={"phone": "+1 555 0100", "city": "Austin"}
+            user_id=user_id,
+            fields={
+                "phone": "+1 555 0100",
+                "linkedin_url": "https://li/x",
+                "github_url": "https://gh/x",
+                "website_url": "https://x.dev",
+                "address": "101 Main St",
+                "city": "Austin",
+                "state": "TX",
+                "country": "US",
+                "postal_code": "78701",
+                "date_of_birth": date(1990, 5, 12),
+                "gender": "female",
+                "ethnicity": "prefer_not_to_say",
+                "veteran_status": "no",
+                "disability_status": "prefer_not_to_say",
+                "work_authorization": "us_citizen",
+                "custom_fields": {"referral": "linkedin", "years_experience": 7},
+            },
         )
-        assert created["phone"] == "+1 555 0100" and created["city"] == "Austin"
-        updated = await svc.update(user_id=user_id, fields={"linkedin_url": "https://li/x"})
-        assert updated["phone"] == "+1 555 0100" and updated["linkedin_url"] == "https://li/x"
+        assert created["phone"] == "+1 555 0100"
+        assert created["city"] == "Austin"
+        assert created["country"] == "US"
+        assert created["date_of_birth"] == date(1990, 5, 12)
+        assert created["custom_fields"] == {"referral": "linkedin", "years_experience": 7}
+        created_at = created["created_at"]
+        updated = await svc.update(
+            user_id=user_id,
+            fields={"phone": "+1 555 0199", "state": "CA", "github_url": None},
+        )
+        assert updated["phone"] == "+1 555 0199"    # changed in place
+        assert updated["state"] == "CA"             # added on update
+        assert updated["github_url"] is None        # cleared to NULL
+        assert updated["city"] == "Austin"          # preserved across upsert
+        assert updated["linkedin_url"] == "https://li/x"
+        assert updated["custom_fields"] == {"referral": "linkedin", "years_experience": 7}
+        assert updated["created_at"] == created_at  # same row, updated not re-inserted
+        assert updated["updated_at"] >= created_at
         async with DbContext(conn, user_id).transaction() as db:
             cursor = await db.execute(
                 "SELECT action FROM audit_logs WHERE resource_type = 'user_profile'"
@@ -382,6 +415,146 @@ async def test_user_profile_rejects_unknown_field() -> None:
         assert exc.value.status == 422
     finally:
         await conn.close()
+
+
+# ------------------------------------------------------------------ §5 D10 lookup carve-out
+async def test_login_sec_def_lookup() -> None:
+    """D10: auth_user_by_email is the narrow SECURITY DEFINER login lookup — single
+    exact-email row, EXECUTE granted to app_user, while a plain RLS SELECT by email
+    stays blocked from any tenant scope."""
+    conn_a, bag_a = await _register()
+    conn_b, bag_b = await _register()
+    try:
+        email_a = bag_a["email"]
+        # (1) SECURITY DEFINER carve-out returns exactly the one matching row,
+        #     regardless of the calling tenant scope (GUC is B here).
+        async with DbContext(conn_b, bag_b["result"].id).transaction() as db:
+            cur = await db.execute("SELECT * FROM auth_user_by_email(%s)", (email_a,))
+            rows = await cur.fetchall()
+        assert len(rows) == 1
+        assert rows[0][1] == email_a
+        assert len(rows[0]) == 4  # id, email, password_hash, name
+
+        # (2) unknown email -> empty result (no row, no error).
+        async with DbContext(conn_b, bag_b["result"].id).transaction() as db:
+            cur = await db.execute("SELECT * FROM auth_user_by_email(%s)", ("ghost@example.com",))
+            assert await cur.fetchall() == []
+
+        # (3) function is STABLE + SECURITY DEFINER and EXECUTE is granted to app_user.
+        async with DbContext(conn_b, bag_b["result"].id).transaction() as db:
+            proc = await (await db.execute(
+                "SELECT prosecdef, provolatile FROM pg_proc WHERE proname = 'auth_user_by_email'"
+            )).fetchone()
+            granted = await db.fetch_scalar(
+                "SELECT has_function_privilege('app_user', 'auth_user_by_email(text)', 'EXECUTE')"
+            )
+        assert proc is not None
+        assert proc[0] is True and proc[1] == "s"  # prosecdef + STABLE
+        assert granted is True
+
+        # (4) plain SELECT by email is still RLS-blocked from B's scope (0 rows).
+        async with DbContext(conn_b, bag_b["result"].id).transaction() as db:
+            cur = await db.execute("SELECT id, email FROM users WHERE email = %s", (email_a,))
+            assert await cur.fetchall() == []
+    finally:
+        await conn_a.close()
+        await conn_b.close()
+
+
+# ------------------------------------------------------------------ §7 global audit shape (I5)
+async def test_auth_audit_actions_exactly_canonical() -> None:
+    """I5: one user's full flow writes exactly the canonical audit action set —
+    nothing extra across register/login/settings/profile."""
+
+    conn, bag = await _register()
+    try:
+        svc = AuthService(conn)
+        user_id = bag["result"].id
+        login = await svc.login(email=bag["email"], password=PASSWORD)
+        assert login.id == user_id
+
+        await SettingsService(conn).update(user_id=user_id, updates={"theme": "light"})
+
+        profile = UserProfileService(conn)
+        await profile.update(
+            user_id=user_id, fields={"phone": "+1 555 0100", "city": "Austin"}
+        )
+        await profile.update(user_id=user_id, fields={"linkedin_url": "https://li/x"})
+
+        async with DbContext(conn, user_id).transaction() as db:
+            cur = await db.execute(
+                "SELECT action, count(*) FROM audit_logs WHERE user_id = %s GROUP BY action",
+                (str(user_id),),
+            )
+            counters = {row[0]: row[1] for row in await cur.fetchall()}
+        assert len(counters) == 5, counters
+        assert counters == {
+            "user_registered": 1,
+            "user_logged_in": 1,
+            "settings_updated": 1,
+            "user_profile_created": 1,
+            "user_profile_updated": 1,
+        }
+    finally:
+        await conn.close()
+
+
+# ------------------------------------------------------------------ §23/§7 api keys (D7/D12)
+async def test_api_key_create_lookup_touch_revoke() -> None:
+    """D7/D12 repo-level key registry: one-time secret, SHA-256 hash, prefix lookup."""
+    conn, bag = await _register()
+    try:
+        user_id = bag["result"].id
+        expires = datetime.now(UTC) + timedelta(days=30)
+        async with DbContext(conn, user_id).transaction() as db:
+            created = await AuthRepository(db).create_api_key(
+                user_id=user_id, name="cli", expires_at=expires
+            )
+        assert created["prefix"].startswith("aa_")
+        assert created["secret"].startswith(f"{user_id}:")
+        assert created["key_hash"] == sha256_hex(created["secret"])
+        assert created["expires_at"] == expires
+        assert created["secret"] != created["key_hash"]          # plaintext never stored
+
+        wrong_secret = "someone-else-secret"
+        assert sha256_hex(wrong_secret) != created["key_hash"]   # non-matching secret fails
+
+        async with DbContext(conn, user_id).transaction() as db:
+            row = await AuthRepository(db).find_api_key_by_prefix(created["prefix"])
+        assert row is not None
+        assert row["user_id"] == user_id
+        assert row["name"] == "cli"
+        assert row["key_hash"] == created["key_hash"]
+        assert row["last_used_at"] is None
+
+        async with DbContext(conn, user_id).transaction() as db:
+            await AuthRepository(db).touch_api_key(created["id"])
+            row = await AuthRepository(db).find_api_key_by_prefix(created["prefix"])
+        assert row is not None and row["last_used_at"] is not None
+
+        async with DbContext(conn, user_id).transaction() as db:
+            assert await AuthRepository(db).revoke_api_key(created["id"]) is True
+            assert await AuthRepository(db).find_api_key_by_prefix(created["prefix"]) is None
+    finally:
+        await conn.close()
+
+
+async def test_api_key_cross_user_scope_and_unknown_prefix() -> None:
+    """RLS scopes api_keys to their owner; unknown prefix has no row (D7)."""
+    conn_a, bag_a = await _register()
+    conn_b, bag_b = await _register()
+    try:
+        async with DbContext(conn_a, bag_a["result"].id).transaction() as db:
+            created = await AuthRepository(db).create_api_key(
+                user_id=bag_a["result"].id, name="a"
+            )
+        async with DbContext(conn_a, bag_a["result"].id).transaction() as db:
+            assert await AuthRepository(db).find_api_key_by_prefix("aa_unknown") is None
+        async with DbContext(conn_b, bag_b["result"].id).transaction() as db:
+            assert await AuthRepository(db).find_api_key_by_prefix(created["prefix"]) is None
+    finally:
+        await conn_a.close()
+        await conn_b.close()
 
 
 # ------------------------------------------------------------------ D7 routes
