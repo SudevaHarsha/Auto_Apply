@@ -2,7 +2,7 @@
 
 Applies db/migrations/*.sql in lexical order, one transaction per file, then
 verifies the resulting schema against the documented invariants
-(20 tables, 37 idx_* indexes, 19/19 RLS enabled/forced, 21 policies,
+(21 tables, 39 idx_* indexes, 20/20 RLS enabled/forced, 22 policies,
 job_snapshots RLS-exempt).
 
 Connection: MIGRATE_DATABASE_URL env var
@@ -24,10 +24,11 @@ DEFAULT_MIGRATE_URL = "postgresql://autoapply:autoapply@localhost:5432/autoapply
 
 # Documented invariants (docs/database/schema.md), reconciled for S1 divergences:
 #   D4 adds ENABLE+FORCE+policy for user_profiles  -> 21 policies, 19 RLS tables.
-EXPECTED_TABLES = 20
-EXPECTED_IDX = 37
-EXPECTED_RLS_TABLES = 19
-EXPECTED_POLICIES = 21
+#   026 adds auth_sessions (table + 2 idx_* + policy) -> 21/39/20/20/22.
+EXPECTED_TABLES = 21
+EXPECTED_IDX = 39
+EXPECTED_RLS_TABLES = 20
+EXPECTED_POLICIES = 22
 RLS_FREE_TABLE = "job_snapshots"
 
 
