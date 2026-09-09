@@ -47,7 +47,7 @@ DEFAULT_MIGRATE_URL = "postgresql://autoapply:autoapply@localhost:5432/autoapply
 #       024 therefore adds ENABLE + FORCE + user_isolation policy.
 DIVERGENCE_D4_EXTRA_POLICIES = {"user_profiles": {"user_isolation"}}
 RLS_EXEMPT = {"job_snapshots"}
-EXPECTED_POLICY_COUNT = 21  # 20 documented statements + 1 D4 user_profiles policy
+EXPECTED_POLICY_COUNT = 22  # 20 documented + D4 user_profiles + 026 auth_sessions
 
 _RE_TABLE = re.compile(r"^CREATE TABLE (?:IF NOT EXISTS )?(\w+)\s*\(", re.M)
 _RE_IDX = re.compile(r"^CREATE INDEX (idx_\w+)\b", re.M)
@@ -204,7 +204,7 @@ def docs_matcher(url: str | None = None) -> dict[str, Any]:
     if live["policy_count"] != EXPECTED_POLICY_COUNT:
         errors.append(
             f"policy count: expected {EXPECTED_POLICY_COUNT}, "
-            f"got {live['policy_count']} (20 doc statements + D4 user_profiles)"
+            f"got {live['policy_count']} (20 doc statements + D4 user_profiles + 026)"
         )
     if RLS_EXEMPT & (live["enables"] | live["forces"]):
         errors.append(f"{RLS_EXEMPT} must stay RLS-exempt")
@@ -233,7 +233,7 @@ def main() -> int:
         print("\n".join(report_lines))
         print("  golden pg_dump diff   : clean (tables/indexes/fks match committed golden)")
         print("  docs matcher          : docs/database/schema.md matches live catalogs")
-        print("  policy-carry tables   : == RLS-enabled tables (19), job_snapshots exempt")
+        print("  policy-carry tables   : == RLS-enabled tables (20), job_snapshots exempt")
         return 0
     report_lines.append(f"  golden diff: {result['golden']['error']}")
     for err in result["problems"]:

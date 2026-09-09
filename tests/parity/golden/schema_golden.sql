@@ -2,7 +2,7 @@
 -- PostgreSQL database dump
 --
 
-\restrict dWtELuaQmnwPmHr5ZkOzumWxNlCuf76ee8xLzZC7WcXxdLthrbjqjYFHgirL5O0
+\restrict tNojhZBpWYBkStkPQiZAzaszFlnZF8pyqEWIz22jPBySg8PSUtpi94KixZ6NfuE
 
 -- Dumped from database version 16.15 (Debian 16.15-1.pgdg13+2)
 -- Dumped by pg_dump version 16.15 (Debian 16.15-1.pgdg13+2)
@@ -81,6 +81,21 @@ BEGIN
     END IF;
     RETURN NEW;
 END;
+$$;
+
+
+--
+-- Name: auth_user_by_email(text); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.auth_user_by_email(p_email text) RETURNS TABLE(id uuid, email text, password_hash text, name text)
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'public'
+    AS $$
+    SELECT id, email, password_hash, name
+    FROM users
+    WHERE email = p_email
+    LIMIT 1;
 $$;
 
 
@@ -226,6 +241,22 @@ CREATE TABLE public.audit_logs (
 );
 
 ALTER TABLE ONLY public.audit_logs FORCE ROW LEVEL SECURITY;
+
+
+--
+-- Name: auth_sessions; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.auth_sessions (
+    id uuid DEFAULT public.uuid_generate_v4() NOT NULL,
+    user_id uuid NOT NULL,
+    jti_hash text NOT NULL,
+    expires_at timestamp with time zone NOT NULL,
+    revoked_at timestamp with time zone,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+ALTER TABLE ONLY public.auth_sessions FORCE ROW LEVEL SECURITY;
 
 
 --
@@ -605,6 +636,14 @@ ALTER TABLE ONLY public.audit_logs
 
 
 --
+-- Name: auth_sessions auth_sessions_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.auth_sessions
+    ADD CONSTRAINT auth_sessions_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: checkpoints checkpoints_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -843,6 +882,20 @@ CREATE INDEX idx_audit_logs_action ON public.audit_logs USING btree (user_id, ac
 --
 
 CREATE INDEX idx_audit_logs_user_id ON public.audit_logs USING btree (user_id);
+
+
+--
+-- Name: idx_auth_sessions_jti_hash; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_auth_sessions_jti_hash ON public.auth_sessions USING btree (jti_hash);
+
+
+--
+-- Name: idx_auth_sessions_user_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_auth_sessions_user_id ON public.auth_sessions USING btree (user_id);
 
 
 --
@@ -1160,6 +1213,14 @@ ALTER TABLE ONLY public.audit_logs
 
 
 --
+-- Name: auth_sessions auth_sessions_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.auth_sessions
+    ADD CONSTRAINT auth_sessions_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE;
+
+
+--
 -- Name: checkpoints checkpoints_job_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -1370,6 +1431,12 @@ ALTER TABLE public.applications ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.audit_logs ENABLE ROW LEVEL SECURITY;
 
 --
+-- Name: auth_sessions; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.auth_sessions ENABLE ROW LEVEL SECURITY;
+
+--
 -- Name: checkpoints; Type: ROW SECURITY; Schema: public; Owner: -
 --
 
@@ -1486,6 +1553,13 @@ CREATE POLICY user_isolation ON public.applications USING ((user_id = (current_s
 --
 
 CREATE POLICY user_isolation ON public.audit_logs USING ((user_id = (current_setting('app.user_id'::text))::uuid));
+
+
+--
+-- Name: auth_sessions user_isolation; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY user_isolation ON public.auth_sessions USING ((user_id = (current_setting('app.user_id'::text))::uuid));
 
 
 --
@@ -1616,5 +1690,5 @@ ALTER TABLE public.users ENABLE ROW LEVEL SECURITY;
 -- PostgreSQL database dump complete
 --
 
-\unrestrict dWtELuaQmnwPmHr5ZkOzumWxNlCuf76ee8xLzZC7WcXxdLthrbjqjYFHgirL5O0
+\unrestrict tNojhZBpWYBkStkPQiZAzaszFlnZF8pyqEWIz22jPBySg8PSUtpi94KixZ6NfuE
 
