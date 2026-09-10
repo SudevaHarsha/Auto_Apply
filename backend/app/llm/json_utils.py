@@ -29,7 +29,7 @@ def _extract_fenced(text: str) -> str | None:
 
 
 def _unwrap_single_key(value: dict[str, Any]) -> dict[str, Any] | list[Any] | None:
-    if len(value) == 1 and next(iter(value)) in _WRAPPER_KEYS and isinstance(value[next(iter(value))], (dict, list)):
+    if len(value) == 1 and next(iter(value)) in _WRAPPER_KEYS and isinstance(value[next(iter(value))], dict | list):
         return value[next(iter(value))]
     return None
 
