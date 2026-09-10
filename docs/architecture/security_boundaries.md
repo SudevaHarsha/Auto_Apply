@@ -191,11 +191,14 @@ User provides API key
 `api_keys.key_hash` is **not** AES-256-encrypted — it is a **SHA-256 hash** (one-way, unusable
 for round-trip recovery). The "API Key Store (AES-256 encrypted)" label in the trust-zone diagram
 applies **only** to `llm_providers.api_key_encrypted` (decrypted in memory, never persisted plain).
+As of **S4 (D18)** the at-rest encoding is implemented: AES-256-GCM via
+`backend/app/llm/crypto.py`, 32-byte master key from `LLM_PROVIDER_MASTER_KEY`,
+`nonce:ciphertext` blob, decrypt in-memory only, never returned/echoed/logged.
 
 ```
 THING                            STORAGE                          REVERSIBLE?
 ──────────────────────────────────────────────────────────────────────────
-llm_providers.api_key_encrypted  AES-256 (server env key)          Yes (in-memory only)
+llm_providers.api_key_encrypted  AES-256-GCM (env master key)       Yes (in-memory only)   # implemented in S4 (D18)
 api_keys.key_hash                SHA-256 hash + prefix + name     No (one-way)
 ```
 

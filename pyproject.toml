@@ -9,6 +9,9 @@ dependencies = [
     "psycopg[binary]",
     "bcrypt",
     "PyJWT",
+    "httpx",
+    "pydantic",
+    "cryptography",
 ]
 
 [project.optional-dependencies]
@@ -17,7 +20,6 @@ dev = [
     "mypy",
     "pytest",
     "pytest-asyncio",
-    "httpx",
     "pre-commit",
 ]
 

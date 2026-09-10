@@ -19,9 +19,11 @@ from backend.app.auth.errors import (
 from backend.app.db.context import DbContext
 from backend.app.db.repositories.auth_repository import AuthRepository
 from backend.app.db.repositories.observability_repository import ObservabilityRepository
+from backend.app.llm.registry import registered_names
 
 # §17 authoritative schema: key -> (validator, default)
-_LLM_PROVIDERS = ("gemini", "ollama", "groq", "openrouter")
+# D19: llm_chain is validated against the provider registry, not a fixed 4-name list.
+_LLM_PROVIDERS = tuple(registered_names())
 
 
 def _validate_int_ranged(min_value: int, max_value: int):

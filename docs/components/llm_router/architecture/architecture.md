@@ -100,6 +100,23 @@ Shared circuit breaker states:
 
 ---
 
+## Provider Registry (capability gate)
+
+With migration 027 the `llm_providers.name` CHECK is lifted (DB enforces lowercase only). The
+**provider registry** (`backend/app/llm/registry.py`) is now the single source of truth for which
+providers the code can actually call:
+
+- `name → (adapter, default_model)`.
+- `add_provider` validates `name` against the registry — unregistered → `VALIDATION_ERROR`.
+- `route_llm_request` treats a resolved-but-unregistered name as **unavailable** (skipped, same
+  as "Ollama not running → skip").
+- `llm_chain` settings validation is registry-membership based.
+
+Adding a new provider = registry entry (+ dedicated adapter only for non-OpenAI-compatible
+protocols; most providers reuse the OpenAI-compatible adapter with a `base_url`/`model`/key row).
+
+---
+
 ## Rate Limit Handling
 
 ```

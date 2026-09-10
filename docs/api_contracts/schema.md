@@ -1190,8 +1190,12 @@ Add a new LLM provider.
 ```
 
 **Side effects:**
-- Encrypts `api_key` with AES-256 before storing
+- Encrypts `api_key` with **AES-256-GCM** before storing in `api_key_encrypted` (`nonce:ciphertext`, 32-byte master key from `LLM_PROVIDER_MASTER_KEY`, D18) and **never returns it**; decrypted in-memory only at call/test time
 - Logs `llm_provider_added` to `audit_logs`
+
+**Errors:**
+- `VALIDATION_ERROR` (422) — `name` is not a registered provider (provider registry, D19).
+  Since migration 027 the DB no longer restricts provider names; the registry is the gate.
 
 ---
 

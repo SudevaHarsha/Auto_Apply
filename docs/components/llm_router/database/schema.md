@@ -2,8 +2,13 @@
 
 Tables owned by the llm_router component.
 
-> **Canonical source:** `docs/database/schema.md` — migration 005 (llm_providers), 014 (provider_usage), 016 (rate_limit_state).
+> **Canonical source:** `docs/database/schema.md` — migration 005 (llm_providers), 014 (provider_usage), 016 (rate_limit_state), 027 (provider-name CHECK lifted).
 > If any column differs here vs canonical, canonical wins.
+>
+> **Post-027 (S4 · D19):** `llm_providers.name` is **not** restricted to the original 4 providers.
+> The database enforces lowercase only (`CHECK (name = lower(name))`); the **provider registry**
+> (`backend/app/llm/registry.py`) is the capability gate — `name` must be a registered adapter
+> key, and unregistered names are treated as unavailable by the router.
 
 ---
 
@@ -13,7 +18,7 @@ Tables owned by the llm_router component.
 CREATE TABLE llm_providers (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    name TEXT NOT NULL CHECK (name IN ('gemini', 'ollama', 'groq', 'openrouter')),
+    name TEXT NOT NULL CHECK (name = lower(name)),
     base_url TEXT NOT NULL,
     api_key_encrypted TEXT,
     model TEXT NOT NULL,
