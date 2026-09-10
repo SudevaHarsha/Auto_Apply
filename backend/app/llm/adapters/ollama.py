@@ -56,13 +56,23 @@ class OllamaAdapter:
             )
         latency_ms = int((time.monotonic() - started) * 1000)
         if resp.status_code == 200:
-            data = resp.json()
+            try:
+                data = resp.json()
+                prompt_tokens = int(data.get("prompt_eval_count") or 0)
+                completion_tokens = int(data.get("eval_count") or 0)
+            except (TypeError, ValueError):
+                return ChatResponse(
+                    status="http_error",
+                    status_code=resp.status_code,
+                    error_type="unparseable_body",
+                    latency_ms=latency_ms,
+                )
             return ChatResponse(
                 status="ok",
                 content=(data.get("message") or {}).get("content") or "",
                 model=data.get("model") or model,
-                prompt_tokens=int(data.get("prompt_eval_count") or 0),
-                completion_tokens=int(data.get("eval_count") or 0),
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
                 latency_ms=latency_ms,
             )
         if resp.status_code == 503:

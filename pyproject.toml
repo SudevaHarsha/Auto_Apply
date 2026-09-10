@@ -47,3 +47,6 @@ warn_unused_configs = true
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+markers = [
+    "live: opt-in live provider smoke tests needing real API keys (.env.live, -Target test-integration-live)",
+]

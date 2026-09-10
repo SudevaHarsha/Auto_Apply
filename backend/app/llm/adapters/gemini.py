@@ -61,22 +61,32 @@ class GeminiAdapter:
             )
         latency_ms = int((time.monotonic() - started) * 1000)
         if resp.status_code == 200:
-            data = resp.json()
-            content = None
-            for candidate in data.get("candidates") or []:
-                for part in (candidate.get("content") or {}).get("parts") or []:
-                    if part.get("text"):
-                        content = part["text"]
+            try:
+                data = resp.json()
+                content = None
+                for candidate in data.get("candidates") or []:
+                    for part in (candidate.get("content") or {}).get("parts") or []:
+                        if part.get("text"):
+                            content = part["text"]
+                            break
+                    if content:
                         break
-                if content:
-                    break
-            usage = data.get("usageMetadata") or {}
+                usage = data.get("usageMetadata") or {}
+                prompt_tokens = int(usage.get("promptTokenCount") or 0)
+                completion_tokens = int(usage.get("candidatesTokenCount") or 0)
+            except (TypeError, ValueError):
+                return ChatResponse(
+                    status="http_error",
+                    status_code=resp.status_code,
+                    error_type="unparseable_body",
+                    latency_ms=latency_ms,
+                )
             return ChatResponse(
                 status="ok",
                 content=content or "",
                 model=data.get("model") or model,
-                prompt_tokens=int(usage.get("promptTokenCount") or 0),
-                completion_tokens=int(usage.get("candidatesTokenCount") or 0),
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
                 latency_ms=latency_ms,
             )
         if resp.status_code == 429:

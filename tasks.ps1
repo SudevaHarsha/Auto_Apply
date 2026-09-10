@@ -135,6 +135,25 @@ switch ($Target) {
             & $Py db/per_run_db.py cleanup
         }
     }
+    "test-integration-live" {
+        Load-TestEnv
+        Load-Env -File ".env.live"
+        Set-Item -Path env:RUN_LIVE_LLM -Value "1"
+        Set-Item -Path env:PARITY_COMPOSE -Value "infra/docker-compose.test.yml"
+        Set-Item -Path env:PARITY_DB_SERVICE -Value "db_test"
+        & docker compose -f infra/docker-compose.test.yml up -d db_test
+        Wait-Db -ComposeFile "infra/docker-compose.test.yml" -Service "db_test"
+        Invoke-Check { & $Py db/per_run_db.py ensure-baseline } -What "ensure test baseline"
+        $clone = Invoke-Check { & $Py db/per_run_db.py create } -What "create test clone"
+        $clone = $clone.Trim()
+        Set-Item -Path env:MIGRATE_DATABASE_URL -Value (New-DbUrl $env:MIGRATE_DATABASE_URL $clone)
+        Set-Item -Path env:DATABASE_URL -Value (New-DbUrl $env:DATABASE_URL $clone)
+        try {
+            Invoke-Check { & $Py -m pytest tests/live -m live } -What "live provider tests"
+        } finally {
+            & $Py db/per_run_db.py cleanup
+        }
+    }
     "test-e2e" { & $Py -m pytest tests/e2e }
     "test-env-up" {
         Load-TestEnv

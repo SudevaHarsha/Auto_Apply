@@ -821,6 +821,21 @@ def test_ollama_adapter_wire_behavior() -> None:
     assert resp.status == "unavailable" and resp.error_type == "connection"
 
 
+def test_adapters_map_nonjson_200_body_to_unparseable_body() -> None:
+    """A 200 whose body is not valid JSON must map to http_error, never raise (D14 contract)."""
+
+    def html_body(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=b"<html>not json</html>", request=request)
+
+    for adapter, url in [
+        (OpenAICompatibleAdapter(transport=httpx.MockTransport(html_body)), "https://api.groq.com/openai/v1"),
+        (GeminiAdapter(transport=httpx.MockTransport(html_body)), "https://generativelanguage.googleapis.com"),
+        (OllamaAdapter(transport=httpx.MockTransport(html_body)), "http://localhost:11434"),
+    ]:
+        resp = adapter.chat(prompt="hi", system_message=None, model="m", base_url=url, api_key="k")
+        assert resp.status == "http_error" and resp.error_type == "unparseable_body"
+
+
 # ------------------------------------------------------ mid-chain unavailable (B4)
 async def test_mid_chain_unavailable_skipped_not_failed() -> None:
     """Ollama 503/model-loading -> skipped (no breaker transition), groq succeeds."""
