@@ -13,11 +13,13 @@ from sqlalchemy import Column, String, Integer, JSON, ForeignKey, DateTime, Bool
 from sqlalchemy.dialects.postgresql import UUID, JSONB, INET
 from sqlalchemy.orm import relationship
 
+
 class User(Base):
     __tablename__ = "users"  # owned by auth
     id = Column(UUID, primary_key=True)
     email = Column(String, unique=True, nullable=False)
     ...
+
 
 class Profile(Base):
     __tablename__ = "profiles"  # owned by core_engine
@@ -25,11 +27,13 @@ class Profile(Base):
     user_id = Column(UUID, ForeignKey("users.id"))
     ...
 
+
 class Job(Base):
     __tablename__ = "jobs"  # owned by core_engine
     id = Column(UUID, primary_key=True)
     user_id = Column(UUID, ForeignKey("users.id"))
     ...
+
 
 # ... all 20 tables mapped
 ```

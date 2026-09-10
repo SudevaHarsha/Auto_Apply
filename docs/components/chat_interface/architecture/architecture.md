@@ -105,16 +105,13 @@ def process_bot_message(message: str, user_id: str) -> dict:
                 method=cmd_config["method"],
                 endpoint=cmd_config["endpoint"].format(**params),
                 query=cmd_config.get("params", {}),
-                user_id=user_id
+                user_id=user_id,
             )
 
             return format_response(cmd_name, response)
 
     # No pattern matched
-    return {
-        "type": "error",
-        "text": "I don't understand that command. Type 'help' to see available commands."
-    }
+    return {"type": "error", "text": "I don't understand that command. Type 'help' to see available commands."}
 ```
 
 ### Error Handling
@@ -184,56 +181,46 @@ TOOLS = [
         "parameters": {
             "query": "Search query (optional)",
             "status": "Filter by status: discovered, scored, approved, applying, applied, rejected, skipped, failed (optional)",
-            "platform": "Filter by platform: greenhouse, lever, linkedin, indeed, workday, generic (optional)"
+            "platform": "Filter by platform: greenhouse, lever, linkedin, indeed, workday, generic (optional)",
         },
-        "api": "GET /api/jobs"
+        "api": "GET /api/jobs",
     },
     {
         "name": "analyze_match",
         "description": "Score how well a job matches the user's profile.",
-        "parameters": {
-            "job_id": "UUID of the job to analyze"
-        },
-        "api": "POST /api/jobs/{job_id}/score"
+        "parameters": {"job_id": "UUID of the job to analyze"},
+        "api": "POST /api/jobs/{job_id}/score",
     },
     {
         "name": "approve_job",
         "description": "Approve a job and start the optimization pipeline.",
-        "parameters": {
-            "job_id": "UUID of the job to approve"
-        },
-        "api": "POST /api/jobs/{job_id}/approve"
+        "parameters": {"job_id": "UUID of the job to approve"},
+        "api": "POST /api/jobs/{job_id}/approve",
     },
     {
         "name": "reject_job",
         "description": "Reject a job. It won't appear again.",
-        "parameters": {
-            "job_id": "UUID of the job to reject"
-        },
-        "api": "POST /api/jobs/{job_id}/reject"
+        "parameters": {"job_id": "UUID of the job to reject"},
+        "api": "POST /api/jobs/{job_id}/reject",
     },
     {
         "name": "get_package",
         "description": "Get the application package (PDF, cover letter, field mappings) for an approved job.",
-        "parameters": {
-            "application_id": "UUID of the application"
-        },
-        "api": "GET /api/applications/{application_id}"
+        "parameters": {"application_id": "UUID of the application"},
+        "api": "GET /api/applications/{application_id}",
     },
     {
         "name": "list_providers",
         "description": "List all LLM providers and their status.",
         "parameters": {},
-        "api": "GET /api/llm/providers"
+        "api": "GET /api/llm/providers",
     },
     {
         "name": "resume_pipeline",
         "description": "Resume a paused pipeline from a checkpoint.",
-        "parameters": {
-            "checkpoint_id": "UUID of the checkpoint"
-        },
-        "api": "POST /api/checkpoints/{checkpoint_id}/resume"
-    }
+        "parameters": {"checkpoint_id": "UUID of the checkpoint"},
+        "api": "POST /api/checkpoints/{checkpoint_id}/resume",
+    },
 ]
 ```
 
@@ -315,12 +302,7 @@ def process_agent_message(message: str, user_id: str) -> dict:
     context = build_context(user_id)
 
     # 2. Call LLM with tools
-    llm_response = call_llm(
-        system=AGENT_SYSTEM_PROMPT,
-        message=message,
-        tools=TOOLS,
-        context=context
-    )
+    llm_response = call_llm(system=AGENT_SYSTEM_PROMPT, message=message, tools=TOOLS, context=context)
 
     # 3. Execute tool calls
     tool_results = []
@@ -332,7 +314,7 @@ def process_agent_message(message: str, user_id: str) -> dict:
     final_response = call_llm(
         system=AGENT_SYSTEM_PROMPT,
         message=f"Tool results: {tool_results}",
-        tools=None  # No more tools needed
+        tools=None,  # No more tools needed
     )
 
     return format_response("agent", final_response)

@@ -50,7 +50,7 @@ def test_migrations_apply_twice_on_fresh_db() -> None:
             admin.execute(f"DROP DATABASE IF EXISTS {SCRATCH_DB} WITH (FORCE)")
             admin.execute(f"CREATE DATABASE {SCRATCH_DB}")
             applied, summary = migrate(scratch_url)
-            assert len(applied) == 26  # 001..026
+            assert len(applied) == 27  # 001..027
             assert summary["tables"] == 21
             assert summary["policies"] == 22
     finally:

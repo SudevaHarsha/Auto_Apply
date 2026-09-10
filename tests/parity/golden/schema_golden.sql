@@ -2,7 +2,7 @@
 -- PostgreSQL database dump
 --
 
-\restrict tNojhZBpWYBkStkPQiZAzaszFlnZF8pyqEWIz22jPBySg8PSUtpi94KixZ6NfuE
+\restrict Nb1Q1fVsJ67TkpEMPhZWiWnNVgZS8zgcRjHKKApYlvtvpdXSINDy5ipeKsX52n0
 
 -- Dumped from database version 16.15 (Debian 16.15-1.pgdg13+2)
 -- Dumped by pg_dump version 16.15 (Debian 16.15-1.pgdg13+2)
@@ -427,7 +427,7 @@ CREATE TABLE public.llm_providers (
     priority integer DEFAULT 0 NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT llm_providers_name_check CHECK ((name = ANY (ARRAY['gemini'::text, 'ollama'::text, 'groq'::text, 'openrouter'::text])))
+    CONSTRAINT llm_providers_name_lowercase CHECK ((name = lower(name)))
 );
 
 ALTER TABLE ONLY public.llm_providers FORCE ROW LEVEL SECURITY;
@@ -1690,4 +1690,4 @@ ALTER TABLE public.users ENABLE ROW LEVEL SECURITY;
 -- PostgreSQL database dump complete
 --
 
-\unrestrict tNojhZBpWYBkStkPQiZAzaszFlnZF8pyqEWIz22jPBySg8PSUtpi94KixZ6NfuE
+\unrestrict Nb1Q1fVsJ67TkpEMPhZWiWnNVgZS8zgcRjHKKApYlvtvpdXSINDy5ipeKsX52n0

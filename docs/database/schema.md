@@ -994,10 +994,7 @@ Every FastAPI request must set the user context:
 async def get_db():
     async with async_session() as session:
         # Set the user_id for RLS enforcement
-        await session.execute(
-            "SET LOCAL app.user_id = :user_id",
-            {"user_id": current_user.id}
-        )
+        await session.execute("SET LOCAL app.user_id = :user_id", {"user_id": current_user.id})
         yield session
 ```
 
@@ -1116,3 +1113,29 @@ $$;
 
 GRANT EXECUTE ON FUNCTION auth_user_by_email(text) TO app_user;
 ```
+
+---
+
+## Migration 027: Provider Name Constraint Lifted (S4)
+
+Moves the LLM-provider capability gate from the schema into the **provider registry** (code in
+`backend/app/llm/registry.py`, D19). From this migration on, the database accepts any lowercase
+provider `name`; whether a name is actually callable is decided by the registry (whether an
+adapter is registered for it), **not** by the database.
+
+```sql
+-- File: migrations/027_lift_llm_provider_name_check.sql
+
+ALTER TABLE llm_providers DROP CONSTRAINT llm_providers_name_check;
+ALTER TABLE llm_providers ADD CONSTRAINT llm_providers_name_lowercase
+  CHECK (name = lower(name));
+```
+
+### Effect
+
+- `llm_providers.name` no longer restricts inserts to `gemini/ollama/groq/openrouter`; it only
+  enforces lowercase (so `"Anthropic"` and `"anthropic"` cannot coexist as two rows).
+- Adding a new provider = registry entry (+ adapter for non-OpenAI-compatible protocols);
+  **no further migrations**.
+- `llm_chain` settings validation is registry-membership based (not the fixed 4-name list).
+- Historical migration 005 is unchanged (forward-only).
