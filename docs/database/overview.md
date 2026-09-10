@@ -324,7 +324,7 @@ llm_providers (1) ────< (N) provider_usage
 3. api_keys              ← MCP server auth (hashed, prefixed)
 4. audit_logs            ← immutable action tracking
 5. settings              ← user preferences (threshold, auto-approve)
-6. provider_usage        ← per-request LLM usage (tokens, latency, cost)
+6. provider_usage        ← per-request LLM usage (tokens, latency, success, error_type)
 7. pipeline_runs         ← full execution history (start, end, steps)
 8. rate_limit_state      ← circuit breaker persistence across restarts
 9. telegram_messages     ← raw message log (for debugging, replay)
