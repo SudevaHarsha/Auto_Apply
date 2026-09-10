@@ -33,9 +33,9 @@ class ProviderSpec:
 
 
 REGISTRY: dict[str, ProviderSpec] = {
-    "gemini": ProviderSpec(GeminiAdapter, "https://generativelanguage.googleapis.com", "gemini-2.0-flash"),
+    "gemini": ProviderSpec(GeminiAdapter, "https://generativelanguage.googleapis.com", "gemini-3.6-flash"),
     "ollama": ProviderSpec(OllamaAdapter, "http://localhost:11434", "llama3"),
-    "groq": ProviderSpec(OpenAICompatibleAdapter, "https://api.groq.com/openai/v1", "llama-3.1-70b-versatile"),
+    "groq": ProviderSpec(OpenAICompatibleAdapter, "https://api.groq.com/openai/v1", "openai/gpt-oss-20b"),
     "openrouter": ProviderSpec(OpenAICompatibleAdapter, "https://openrouter.ai/api/v1", "openai/gpt-4o-mini"),
 }
 

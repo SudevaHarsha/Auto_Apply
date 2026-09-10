@@ -1,16 +1,15 @@
+"""Test-session event-loop policy (Windows/Python 3.14).
+
+psycopg's async layer refuses the Windows-default ``ProactorEventLoop``; every
+``AsyncConnection.connect`` raises ``InterfaceError`` under it. Set the Windows
+selector loop policy before any pytest-asyncio loop is created so the DB-backed
+suites (integration incl. the opt-in live LLM tests) can open async connections.
+"""
+
+from __future__ import annotations
+
+import asyncio
 import sys
-from pathlib import Path
 
-import pytest
-from fastapi.testclient import TestClient
-
-from backend.app.main import app
-
-ROOT = Path(__file__).resolve().parents[1]
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
-
-
-@pytest.fixture
-def client() -> TestClient:
-    return TestClient(app)
+if sys.platform == "win32":
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
