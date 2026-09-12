@@ -27,7 +27,7 @@ from backend.app.db.repositories import (
     LlmRouterRepository,
 )
 
-APP_URL = os.getenv("DATABASE_URL", "postgresql://app_user:changeme_in_production@localhost:5432/autoapply")
+APP_URL = os.getenv("DATABASE_URL", "postgresql://app_user:changeme_in_production@localhost:5435/autoapply")
 
 
 async def _connect() -> psycopg.AsyncConnection:

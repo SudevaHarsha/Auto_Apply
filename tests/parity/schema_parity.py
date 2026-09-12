@@ -37,7 +37,7 @@ GOLDEN = REPO / "tests" / "parity" / "golden" / "schema_golden.sql"
 COMPOSE = REPO / os.getenv("PARITY_COMPOSE", "infra/docker-compose.dev.yml")
 DB_SERVICE = os.getenv("PARITY_DB_SERVICE", "db")
 
-DEFAULT_MIGRATE_URL = "postgresql://autoapply:autoapply@localhost:5432/autoapply"
+DEFAULT_MIGRATE_URL = "postgresql://autoapply:autoapply@localhost:5435/autoapply"
 
 # S1 documented divergences (reconciled in the migrations, final-schema-preserving):
 #   D1: doc 007's discord ENABLE+policy block moved to 022 (tables created there).
@@ -50,7 +50,7 @@ RLS_EXEMPT = {"job_snapshots"}
 EXPECTED_POLICY_COUNT = 22  # 20 documented + D4 user_profiles + 026 auth_sessions
 
 _RE_TABLE = re.compile(r"^CREATE TABLE (?:IF NOT EXISTS )?(\w+)\s*\(", re.M)
-_RE_IDX = re.compile(r"^CREATE INDEX (idx_\w+)\b", re.M)
+_RE_IDX = re.compile(r"^CREATE (?:UNIQUE )?INDEX (idx_\w+)\b", re.M)
 _RE_POLICY = re.compile(r"^CREATE POLICY (\w+)\b", re.M)
 _RE_ENABLE = re.compile(r"^ALTER TABLE (\w+) ENABLE ROW LEVEL SECURITY", re.M)
 _RE_FORCE = re.compile(r"^ALTER TABLE (\w+) FORCE ROW LEVEL SECURITY", re.M)

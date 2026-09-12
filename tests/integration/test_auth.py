@@ -42,7 +42,7 @@ from backend.app.main import app
 
 os.environ.setdefault("JWT_SECRET", "test-secret-0123456789abcdef0123456789abcdef")
 
-APP_URL = os.getenv("DATABASE_URL", "postgresql://app_user:changeme_in_production@localhost:5432/autoapply")
+APP_URL = os.getenv("DATABASE_URL", "postgresql://app_user:changeme_in_production@localhost:5435/autoapply")
 
 PASSWORD = "Str0ng!password"
 WEAK_PASSWORD = "short"

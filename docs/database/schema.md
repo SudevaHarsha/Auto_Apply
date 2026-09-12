@@ -35,6 +35,7 @@ CREATE TABLE profiles (
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     original_pdf_url TEXT NOT NULL,
     json_resume JSONB NOT NULL,
+    pdf_sha256 TEXT,
     last_scored_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -1139,3 +1140,31 @@ ALTER TABLE llm_providers ADD CONSTRAINT llm_providers_name_lowercase
   **no further migrations**.
 - `llm_chain` settings validation is registry-membership based (not the fixed 4-name list).
 - Historical migration 005 is unchanged (forward-only).
+
+---
+
+## Migration 028: Profile PDF SHA-256 (S5)
+
+Adds a content fingerprint for DB-level idempotent upload detection (D23): one profile row per
+`(user_id, sha256-of-PDF)`. The column is nullable — existing rows stay `NULL`; only new uploads
+carry a hash. RLS is unchanged (the existing `user_isolation` policy on `profiles` covers the new
+column transparently).
+
+```sql
+-- File: migrations/028_add_profiles_pdf_sha256.sql
+
+ALTER TABLE profiles ADD COLUMN pdf_sha256 TEXT;
+
+CREATE UNIQUE INDEX idx_profiles_user_sha256
+  ON profiles(user_id, pdf_sha256)
+  WHERE pdf_sha256 IS NOT NULL;
+```
+
+### Effect
+
+- `profiles.pdf_sha256` is the idempotency key: re-uploading the same PDF for the same user returns
+  the existing profile row (no extra LLM calls, no file write, no audit).
+- The partial unique index (`WHERE pdf_sha256 IS NOT NULL`) enforces the invariant at the DB level,
+  while letting historical `NULL` rows remain in place.
+- `idx_` index count moves **39 → 40** (`EXPECTED_IDX = 40` in `db/run_migrations.py`).
+- Migration count moves **27 → 28** (`001..028`).

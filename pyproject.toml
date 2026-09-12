@@ -12,6 +12,9 @@ dependencies = [
     "httpx",
     "pydantic",
     "cryptography",
+    "PyMuPDF>=1.26.3",
+    "pymupdf4llm>=0.0.27",
+    "Jinja2",
 ]
 
 [project.optional-dependencies]
@@ -39,10 +42,20 @@ target-version = "py312"
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]
 
+[tool.ruff.lint.per-file-ignores]
+# AGPL-3.0 byte-level file copy (D25/D22 I9 fidelity — must not be modified)
+"backend/app/core_engine/pymupdf_rag_impl.py" = ["E", "F", "B", "SIM"]
+
 [tool.mypy]
 python_version = "3.12"
 exclude = ["vendor/"]
 warn_unused_configs = true
+
+# AGPL-3.0 byte-level file copy (ruff per-file-ignore above); mypy must not
+# report on the frozen vendored converter even when pulled in by imports.
+[[tool.mypy.overrides]]
+module = "backend.app.core_engine.pymupdf_rag_impl"
+ignore_errors = true
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

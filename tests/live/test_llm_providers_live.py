@@ -49,7 +49,7 @@ from backend.app.llm.service import LlmProviderService, ProviderOut
 
 pytestmark = pytest.mark.live
 
-APP_URL = os.getenv("DATABASE_URL", "postgresql://app_user:changeme_in_production@localhost:5432/autoapply")
+APP_URL = os.getenv("DATABASE_URL", "postgresql://app_user:changeme_in_production@localhost:5435/autoapply")
 
 PASSWORD = "Str0ng!password"
 

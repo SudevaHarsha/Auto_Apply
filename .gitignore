@@ -10,6 +10,8 @@ dist/
 .env
 .env.test
 .env.live
+# live-extraction test PDFs (real personal resumes — never commit)
+tests/live/pdf/
 *.log
 .idea/
 .vscode/
