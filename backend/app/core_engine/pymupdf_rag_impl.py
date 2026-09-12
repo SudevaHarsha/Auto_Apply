@@ -36,14 +36,14 @@ CA 94129, USA, for further information.
 """
 
 import os
-import string
 from binascii import b2a_base64
+from collections import defaultdict
+from dataclasses import dataclass
+
 import pymupdf
 from pymupdf import mupdf
 from pymupdf4llm.helpers.get_text_lines import get_raw_lines, is_white
 from pymupdf4llm.helpers.multi_column import column_boxes
-from dataclasses import dataclass
-from collections import defaultdict
 
 pymupdf.TOOLS.unset_quad_corrections(True)
 

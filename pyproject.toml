@@ -44,7 +44,7 @@ select = ["E", "F", "I", "UP", "B", "SIM"]
 
 [tool.ruff.lint.per-file-ignores]
 # AGPL-3.0 byte-level file copy (D25/D22 I9 fidelity — must not be modified)
-"backend/app/core_engine/pymupdf_rag_impl.py" = ["E", "F", "I", "B", "SIM"]
+"backend/app/core_engine/pymupdf_rag_impl.py" = ["E", "F", "B", "SIM"]
 
 [tool.mypy]
 python_version = "3.12"
