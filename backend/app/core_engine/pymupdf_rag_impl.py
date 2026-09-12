@@ -110,11 +110,7 @@ class IdentifyHeaders:
             page = mydoc.load_page(pno)
             blocks = page.get_text("dict", flags=pymupdf.TEXTFLAGS_TEXT)["blocks"]
             for span in [  # look at all non-empty horizontal spans
-                s
-                for b in blocks
-                for l in b["lines"]
-                for s in l["spans"]
-                if not is_white(s["text"])
+                s for b in blocks for l in b["lines"] for s in l["spans"] if not is_white(s["text"])
             ]:
                 fontsz = round(span["size"])  # # compute rounded fontsize
                 fontsizes[fontsz] += len(span["text"].strip())  # add character count
@@ -129,9 +125,7 @@ class IdentifyHeaders:
         # If not provided, choose the most frequent font size as body text.
         # If no text at all on all pages, just use body_limit.
         # In any case all fonts not exceeding
-        temp = sorted(
-            [(k, v) for k, v in fontsizes.items()], key=lambda i: (i[1], i[0])
-        )
+        temp = sorted([(k, v) for k, v in fontsizes.items()], key=lambda i: (i[1], i[0]))
         if temp:
             # most frequent font size
             self.body_limit = max(body_limit, temp[-1][0])
@@ -273,28 +267,14 @@ def is_significant(box, paths):
         return False  # all paths are horizontal or vertical lines / rectangles
     for p in my_paths:
         rect = p["rect"]
-        if (
-            not (rect & nbox).is_empty and not p["rect"].is_empty
-        ):  # intersects interior: significant!
+        if not (rect & nbox).is_empty and not p["rect"].is_empty:  # intersects interior: significant!
             return True
         # Remaining case: a horizontal or vertical line
         # horizontal line:
-        if (
-            1
-            and rect.y0 == rect.y1
-            and nbox.y0 <= rect.y0 <= nbox.y1
-            and rect.x0 < nbox.x1
-            and rect.x1 > nbox.x0
-        ):
+        if 1 and rect.y0 == rect.y1 and nbox.y0 <= rect.y0 <= nbox.y1 and rect.x0 < nbox.x1 and rect.x1 > nbox.x0:
             pass  # return True
         # vertical line
-        if (
-            1
-            and rect.x0 == rect.x1
-            and nbox.x0 <= rect.x0 <= nbox.x1
-            and rect.y0 < nbox.y1
-            and rect.y1 > nbox.y0
-        ):
+        if 1 and rect.x0 == rect.x1 and nbox.x0 <= rect.x0 <= nbox.x1 and rect.y0 < nbox.y1 and rect.y1 > nbox.y0:
             pass  # return True
     return False
 
@@ -422,9 +402,7 @@ def to_markdown(
         get_header_id = hdr_info.get_header_id
 
     def max_header_id(spans, page):
-        hdr_ids = sorted(
-            [l for l in set([len(get_header_id(s, page=page)) for s in spans]) if l > 0]
-        )
+        hdr_ids = sorted([l for l in set([len(get_header_id(s, page=page)) for s in spans]) if l > 0])
         if not hdr_ids:
             return ""
         return "#" * (hdr_ids[0] - 1) + " "
@@ -459,9 +437,9 @@ def to_markdown(
             # Check if this looks like a partial URL (starts with http or contains domain parts)
             if span_text.startswith("http"):
                 # Use the full link URL as the display text
-                return f'[{link["uri"]}]({link["uri"]})'
+                return f"[{link['uri']}]({link['uri']})"
             else:
-                return f'[{span_text}]({link["uri"]})'
+                return f"[{span_text}]({link['uri']})"
 
         # Multiple links found - need to split the text
         return _resolve_multiple_links(span_text, overlapping_links, bbox)
@@ -485,7 +463,7 @@ def to_markdown(
                 # Perfect match - each part corresponds to a link
                 result_parts = []
                 for i, (part, link) in enumerate(zip(parts, links)):
-                    result_parts.append(f'[{part}]({link["uri"]})')
+                    result_parts.append(f"[{part}]({link['uri']})")
                 return " | ".join(result_parts)
             elif len(parts) >= len(links):
                 # More parts than links - try to match intelligently
@@ -497,7 +475,7 @@ def to_markdown(
             return _match_words_to_links(words, links, span_bbox)
 
         # Fallback: return the first link with the full text
-        return f'[{span_text}]({links[0]["uri"]})'
+        return f"[{span_text}]({links[0]['uri']})"
 
     def _match_parts_to_links(parts, links, span_bbox):
         """Match parts of text to specific links based on content and position."""
@@ -544,7 +522,7 @@ def to_markdown(
                         break
 
             if matched_link:
-                result_parts.append(f'[{part}]({matched_link["uri"]})')
+                result_parts.append(f"[{part}]({matched_link['uri']})")
             else:
                 result_parts.append(part)
 
@@ -556,7 +534,7 @@ def to_markdown(
         if len(words) == len(links):
             result_parts = []
             for word, link in zip(words, links):
-                result_parts.append(f'[{word}]({link["uri"]})')
+                result_parts.append(f"[{word}]({link['uri']})")
             return " ".join(result_parts)
 
         # If more words than links, try to match by content
@@ -568,10 +546,7 @@ def to_markdown(
         We will ignore images that are empty or that have an edge smaller
         than x% of the corresponding page edge."""
         page = parms.page
-        if (
-            rect.width < page.rect.width * image_size_limit
-            or rect.height < page.rect.height * image_size_limit
-        ):
+        if rect.width < page.rect.width * image_size_limit or rect.height < page.rect.height * image_size_limit:
             return ""
         if write_images is True or embed_images is True:
             pix = page.get_pixmap(clip=rect, dpi=DPI)
@@ -582,9 +557,7 @@ def to_markdown(
 
         if write_images is True:
             filename = os.path.basename(parms.filename).replace(" ", "-")
-            image_filename = os.path.join(
-                IMG_PATH, f"{filename}-{page.number}-{i}.{IMG_EXTENSION}"
-            )
+            image_filename = os.path.join(IMG_PATH, f"{filename}-{page.number}-{i}.{IMG_EXTENSION}")
             pix.save(image_filename)
             return image_filename.replace("\\", "/")
         elif embed_images is True:
@@ -625,9 +598,7 @@ def to_markdown(
             tolerance=3,
             ignore_invisible=not parms.accept_invisible,
         )
-        nlines = [
-            l for l in nlines if not intersects_rects(l[0], parms.tab_rects.values())
-        ]
+        nlines = [l for l in nlines if not intersects_rects(l[0], parms.tab_rects.values())]
 
         parms.line_rects.extend([l[0] for l in nlines])  # store line rectangles
 
@@ -665,8 +636,7 @@ def to_markdown(
                             set(
                                 [
                                     pymupdf.Rect(c)
-                                    for c in parms.tabs[i].header.cells
-                                    + parms.tabs[i].cells
+                                    for c in parms.tabs[i].header.cells + parms.tabs[i].cells
                                     if c is not None
                                 ]
                             ),
@@ -711,10 +681,7 @@ def to_markdown(
 
             parms.line_rects.append(lrect)
             # if line rect is far away from the previous one, add a line break
-            if (
-                len(parms.line_rects) > 1
-                and lrect.y1 - parms.line_rects[-2].y1 > lrect.height * 1.5
-            ):
+            if len(parms.line_rects) > 1 and lrect.y1 - parms.line_rects[-2].y1 > lrect.height * 1.5:
                 out_string += "\n"
             # make text string for the full line
             text = " ".join([s["text"] for s in spans]).strip()
@@ -879,9 +846,7 @@ def to_markdown(
             out_string += "```\n"  # switch of code mode
             code = False
         out_string += "\n\n"
-        return (
-            out_string.replace(" \n", "\n").replace("  ", " ").replace("\n\n\n", "\n\n")
-        )
+        return out_string.replace(" \n", "\n").replace("  ", " ").replace("\n\n\n", "\n\n")
 
     def is_in_rects(rect, rect_list):
         """Check if rect is contained in a rect of the list."""
@@ -915,12 +880,7 @@ def to_markdown(
                     # for "words" extraction, add table cells as line rects
                     cells = sorted(
                         set(
-                            [
-                                pymupdf.Rect(c)
-                                for c in parms.tabs[i].header.cells
-                                + parms.tabs[i].cells
-                                if c is not None
-                            ]
+                            [pymupdf.Rect(c) for c in parms.tabs[i].header.cells + parms.tabs[i].cells if c is not None]
                         ),
                         key=lambda c: (c.y1, c.x0),
                     )
@@ -936,12 +896,7 @@ def to_markdown(
                     # for "words" extraction, add table cells as line rects
                     cells = sorted(
                         set(
-                            [
-                                pymupdf.Rect(c)
-                                for c in parms.tabs[i].header.cells
-                                + parms.tabs[i].cells
-                                if c is not None
-                            ]
+                            [pymupdf.Rect(c) for c in parms.tabs[i].header.cells + parms.tabs[i].cells if c is not None]
                         ),
                         key=lambda c: (c.y1, c.x0),
                     )
@@ -1018,31 +973,23 @@ def to_markdown(
         page. If they are unicolor and of the same color, we assume this to
         be the background color.
         """
-        pix = page.get_pixmap(
-            clip=(page.rect.x0, page.rect.y0, page.rect.x0 + 10, page.rect.y0 + 10)
-        )
+        pix = page.get_pixmap(clip=(page.rect.x0, page.rect.y0, page.rect.x0 + 10, page.rect.y0 + 10))
         if not pix.samples or not pix.is_unicolor:
             return None
         pixel_ul = pix.pixel(0, 0)  # upper left color
-        pix = page.get_pixmap(
-            clip=(page.rect.x1 - 10, page.rect.y0, page.rect.x1, page.rect.y0 + 10)
-        )
+        pix = page.get_pixmap(clip=(page.rect.x1 - 10, page.rect.y0, page.rect.x1, page.rect.y0 + 10))
         if not pix.samples or not pix.is_unicolor:
             return None
         pixel_ur = pix.pixel(0, 0)  # upper right color
         if not pixel_ul == pixel_ur:
             return None
-        pix = page.get_pixmap(
-            clip=(page.rect.x0, page.rect.y1 - 10, page.rect.x0 + 10, page.rect.y1)
-        )
+        pix = page.get_pixmap(clip=(page.rect.x0, page.rect.y1 - 10, page.rect.x0 + 10, page.rect.y1))
         if not pix.samples or not pix.is_unicolor:
             return None
         pixel_ll = pix.pixel(0, 0)  # lower left color
         if not pixel_ul == pixel_ll:
             return None
-        pix = page.get_pixmap(
-            clip=(page.rect.x1 - 10, page.rect.y1 - 10, page.rect.x1, page.rect.y1)
-        )
+        pix = page.get_pixmap(clip=(page.rect.x1 - 10, page.rect.y1 - 10, page.rect.x1, page.rect.y1))
         if not pix.samples or not pix.is_unicolor:
             return None
         pixel_lr = pix.pixel(0, 0)  # lower right color
@@ -1083,9 +1030,7 @@ def to_markdown(
         nwords.extend(line)
         return nwords
 
-    def get_page_output(
-        doc, pno, margins, textflags, FILENAME, IGNORE_IMAGES, IGNORE_GRAPHICS
-    ):
+    def get_page_output(doc, pno, margins, textflags, FILENAME, IGNORE_IMAGES, IGNORE_GRAPHICS):
         """Process one page.
 
         Args:
@@ -1108,9 +1053,7 @@ def to_markdown(
         parms.graphics = []
         parms.words = []
         parms.line_rects = []
-        parms.accept_invisible = (
-            page_is_ocr(page) or ignore_alpha
-        )  # accept invisible text
+        parms.accept_invisible = page_is_ocr(page) or ignore_alpha  # accept invisible text
 
         # determine background color
         parms.bg_color = None if not DETECT_BG_COLOR else get_bg_color(page)
@@ -1351,9 +1294,7 @@ def to_markdown(
         textflags |= mupdf.FZ_STEXT_USE_GID_FOR_UNKNOWN_UNICODE
 
     for pno in pages:
-        parms = get_page_output(
-            doc, pno, margins, textflags, FILENAME, IGNORE_IMAGES, IGNORE_GRAPHICS
-        )
+        parms = get_page_output(doc, pno, margins, textflags, FILENAME, IGNORE_IMAGES, IGNORE_GRAPHICS)
         if page_chunks is False:
             document_output += parms.md_string
         else:

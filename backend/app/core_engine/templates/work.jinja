@@ -11,7 +11,7 @@ Return ONLY a JSON object with this structure:
   "work": [
     {
       "name": "Company name",
-      "position": "Job title", 
+      "position": "Job title",
       "startDate": "Start date (YYYY-MM)",
       "endDate": "End date (YYYY-MM) or 'Present'",
       "summary": "Job description",
@@ -20,7 +20,7 @@ Return ONLY a JSON object with this structure:
   ]
 }
 
-**IMPORTANT**: 
+**IMPORTANT**:
 
 For date extraction, follow these rules carefully:
 
@@ -33,4 +33,4 @@ For date extraction, follow these rules carefully:
 7. If dates appear as "Month Year - Month Year", extract both parts
 8. If only years are provided (e.g., "2019-2021"), use the year information only
 
-**IMPORTANT**: Return ONLY valid JSON. Do not include any explanatory text. 
+**IMPORTANT**: Return ONLY valid JSON. Do not include any explanatory text.

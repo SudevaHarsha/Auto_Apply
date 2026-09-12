@@ -88,8 +88,7 @@ async def live_ctx() -> dict:
     pdfs = _live_pdfs()
     if not pdfs:
         raise RuntimeError(
-            f"no live resume PDFs found in {LIVE_PDF_DIR} - "
-            "drop your resumes there (e.g. resume.pdf, resume2.pdf)"
+            f"no live resume PDFs found in {LIVE_PDF_DIR} - drop your resumes there (e.g. resume.pdf, resume2.pdf)"
         )
     conn, result = await _register()
     user_id = result.id
@@ -122,7 +121,9 @@ async def _run_one(conn: psycopg.AsyncConnection, user_id: uuid.UUID, pdf: Path,
     dependent, not a pipeline invariant.
     """
     before = await _count(
-        conn, user_id, "SELECT count(*) FROM provider_usage WHERE user_id = %s AND success = true",
+        conn,
+        user_id,
+        "SELECT count(*) FROM provider_usage WHERE user_id = %s AND success = true",
         str(user_id),
     )
     try:
@@ -145,13 +146,18 @@ async def _run_one(conn: psycopg.AsyncConnection, user_id: uuid.UUID, pdf: Path,
         )
 
     row_count = await _count(
-        conn, user_id, "SELECT count(*) FROM profiles WHERE user_id = %s AND id = %s",
-        str(user_id), str(profile.id),
+        conn,
+        user_id,
+        "SELECT count(*) FROM profiles WHERE user_id = %s AND id = %s",
+        str(user_id),
+        str(profile.id),
     )
     assert row_count == 1, f"{filename}: profile row missing in DB"
 
     after = await _count(
-        conn, user_id, "SELECT count(*) FROM provider_usage WHERE user_id = %s AND success = true",
+        conn,
+        user_id,
+        "SELECT count(*) FROM provider_usage WHERE user_id = %s AND success = true",
         str(user_id),
     )
     new_calls = after - before
@@ -165,7 +171,9 @@ async def _run_one(conn: psycopg.AsyncConnection, user_id: uuid.UUID, pdf: Path,
     )
     assert again.id == profile.id, f"{filename}: re-upload must return the same profile row"
     final = await _count(
-        conn, user_id, "SELECT count(*) FROM provider_usage WHERE user_id = %s AND success = true",
+        conn,
+        user_id,
+        "SELECT count(*) FROM provider_usage WHERE user_id = %s AND success = true",
         str(user_id),
     )
     assert final == after, f"{filename}: idempotent re-upload must not trigger new LLM calls"

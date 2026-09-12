@@ -37,7 +37,9 @@ from tests.doubles.mock_provider import http, ok, scripted_factory
 APP_URL = os.getenv("DATABASE_URL", "postgresql://app_user:changeme_in_production@localhost:5432/autoapply")
 PASSWORD = "Str0ng!password"
 ROOT = Path(__file__).resolve().parents[2]
-VENDOR_PDF = ROOT / "vendor" / "hiring_agent" / "resume" / "sample.pdf"
+# Committed copy of vendor/hiring_agent/resume/sample.pdf (the vendor tree
+# gitignores resume/*.pdf, so CI can never see the original — we own the fixture).
+VENDOR_PDF = ROOT / "tests" / "fixtures" / "sample_resume.pdf"
 MANIFEST_PATH = ROOT / "tests" / "fixtures" / "vendor_manifest.json"
 
 SAMPLE_PDF_BYTES = VENDOR_PDF.read_bytes()
@@ -100,7 +102,10 @@ async def _register():
 
 async def _add_provider(conn, user_id):
     await LlmProviderService(conn).add_provider(
-        user_id=user_id, name="gemini", base_url="https://test.example.com", model="gemini-model",
+        user_id=user_id,
+        name="gemini",
+        base_url="https://test.example.com",
+        model="gemini-model",
     )
 
 
@@ -116,7 +121,8 @@ async def _usage_rows(conn, user_id):
 async def _audit_count(conn, user_id, action):
     async with DbContext(conn, user_id).transaction() as db:
         return await db.fetch_scalar(
-            "SELECT count(*) FROM audit_logs WHERE user_id = %s AND action = %s", (str(user_id), action),
+            "SELECT count(*) FROM audit_logs WHERE user_id = %s AND action = %s",
+            (str(user_id), action),
         )
 
 
@@ -135,7 +141,10 @@ async def test_resume_pdf_to_jsonresume(tmp_path) -> None:
         os.environ["STORAGE_ROOT"] = str(tmp_path)
         svc = ProfilesService(conn)
         result = await svc.upload_profile(
-            user_id=uid, pdf_path=str(VENDOR_PDF), sha256=SAMPLE_SHA256, filename="sample.pdf",
+            user_id=uid,
+            pdf_path=str(VENDOR_PDF),
+            sha256=SAMPLE_SHA256,
+            filename="sample.pdf",
             adapter_factory=factory,
         )
         resume = result.json_resume
@@ -172,7 +181,10 @@ async def test_extraction_routes_through_router(tmp_path) -> None:
         os.environ["STORAGE_ROOT"] = str(tmp_path)
         with pytest.raises(ExtractionFailedError):
             await ProfilesService(conn).upload_profile(
-                user_id=uid, pdf_path=str(VENDOR_PDF), sha256=SAMPLE_SHA256, filename="sample.pdf",
+                user_id=uid,
+                pdf_path=str(VENDOR_PDF),
+                sha256=SAMPLE_SHA256,
+                filename="sample.pdf",
                 adapter_factory=factory,
             )
         assert len(log) >= 1, "adapter_factory was never called"
@@ -196,7 +208,10 @@ async def test_extraction_idempotent(tmp_path) -> None:
         os.environ["STORAGE_ROOT"] = str(tmp_path)
         svc = ProfilesService(conn)
         first = await svc.upload_profile(
-            user_id=uid, pdf_path=str(VENDOR_PDF), sha256=SAMPLE_SHA256, filename="sample.pdf",
+            user_id=uid,
+            pdf_path=str(VENDOR_PDF),
+            sha256=SAMPLE_SHA256,
+            filename="sample.pdf",
             adapter_factory=factory,
         )
         usage_after_first = len(await _usage_rows(conn, uid))
@@ -210,7 +225,10 @@ async def test_extraction_idempotent(tmp_path) -> None:
             details = (await cur.fetchall())[0][0]
         assert details.get("sha256") == SAMPLE_SHA256, "upload audit must carry the pdf sha256 detail"
         second = await svc.upload_profile(
-            user_id=uid, pdf_path=str(VENDOR_PDF), sha256=SAMPLE_SHA256, filename="sample.pdf",
+            user_id=uid,
+            pdf_path=str(VENDOR_PDF),
+            sha256=SAMPLE_SHA256,
+            filename="sample.pdf",
             adapter_factory=factory,
         )
         assert second.id == first.id
@@ -242,7 +260,10 @@ async def test_profiles_crud_rls(tmp_path) -> None:
         factory_a, _, _ = _ok_factory()
         svc_a = ProfilesService(conn_a)
         profile_a = await svc_a.upload_profile(
-            user_id=uid_a, pdf_path=str(VENDOR_PDF), sha256=SAMPLE_SHA256, filename="sample.pdf",
+            user_id=uid_a,
+            pdf_path=str(VENDOR_PDF),
+            sha256=SAMPLE_SHA256,
+            filename="sample.pdf",
             adapter_factory=factory_a,
         )
         summaries = await svc_a.list_profiles(user_id=uid_a)
@@ -255,7 +276,9 @@ async def test_profiles_crud_rls(tmp_path) -> None:
         assert current.json_resume["basics"]["name"] == "Test User"
         audits_before = await _audit_count(conn_a, uid_a, "profile_uploaded")
         updated = await svc_a.update_profile(
-            user_id=uid_a, profile_id=profile_a.id, json_resume={"basics": {"name": "Updated"}},
+            user_id=uid_a,
+            profile_id=profile_a.id,
+            json_resume={"basics": {"name": "Updated"}},
         )
         assert updated.json_resume["basics"]["name"] == "Updated"
         assert await _audit_count(conn_a, uid_a, "profile_uploaded") == audits_before + 1
@@ -310,7 +333,10 @@ async def test_extraction_failure_rolls_back(tmp_path) -> None:
         os.environ["STORAGE_ROOT"] = str(tmp_path)
         with pytest.raises(ExtractionFailedError):
             await ProfilesService(conn).upload_profile(
-                user_id=uid, pdf_path=str(VENDOR_PDF), sha256=SAMPLE_SHA256, filename="sample.pdf",
+                user_id=uid,
+                pdf_path=str(VENDOR_PDF),
+                sha256=SAMPLE_SHA256,
+                filename="sample.pdf",
                 adapter_factory=factory,
             )
         assert await _profile_count(conn, uid) == 0

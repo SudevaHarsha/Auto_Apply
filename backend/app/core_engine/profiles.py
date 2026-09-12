@@ -179,9 +179,7 @@ class ProfilesService:
         async with db.transaction():
             repo = CoreEngineRepository(db)
             if not await repo.update_profile(user_id, profile_id, json_resume):
-                raise ProfileNotFoundError(
-                    "profile not found", details={"profile_id": str(profile_id)}
-                )
+                raise ProfileNotFoundError("profile not found", details={"profile_id": str(profile_id)})
             await ObservabilityRepository(db).insert_audit(
                 action="profile_uploaded",
                 resource_type="profile",

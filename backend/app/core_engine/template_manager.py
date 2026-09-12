@@ -31,9 +31,7 @@ class TemplateManager:
             template_dir (str): Directory containing Jinja templates
         """
         self.template_dir = template_dir
-        self.env = Environment(
-            loader=FileSystemLoader(template_dir), trim_blocks=True, lstrip_blocks=True
-        )
+        self.env = Environment(loader=FileSystemLoader(template_dir), trim_blocks=True, lstrip_blocks=True)
         self._templates: dict[str, Template] = {}
         self._load_templates()
 

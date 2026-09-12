@@ -19,16 +19,12 @@ def transform_parsed_data(parsed_data: dict) -> dict:
                             parsed_data.get("work", parsed_data.get("experience", [])),
                         )
                     ),
-                    "volunteer": transform_organizations(
-                        parsed_data.get("organizations", [])
-                    ),
+                    "volunteer": transform_organizations(parsed_data.get("organizations", [])),
                     "education": transform_education(parsed_data.get("education", [])),
                     "awards": transform_achievements(
                         parsed_data.get(
                             "achievements",
-                            parsed_data.get(
-                                "awards", parsed_data.get("honors_and_awards", [])
-                            ),
+                            parsed_data.get("awards", parsed_data.get("honors_and_awards", [])),
                         )
                     ),
                     "certificates": parsed_data.get("certificates", []),
@@ -44,47 +40,27 @@ def transform_parsed_data(parsed_data: dict) -> dict:
                 if "basics" in parsed_data:
                     basics_data = parsed_data.get("basics", parsed_data)
                     transformed = {"basics": transform_basics(basics_data)}
-                elif (
-                    "work" in parsed_data
-                    or "work_experience" in parsed_data
-                    or "experience" in parsed_data
-                ):
+                elif "work" in parsed_data or "work_experience" in parsed_data or "experience" in parsed_data:
                     work_data = parsed_data.get(
                         "work",
-                        parsed_data.get(
-                            "work_experience", parsed_data.get("experience", [])
-                        ),
+                        parsed_data.get("work_experience", parsed_data.get("experience", [])),
                     )
                     transformed = {"work": transform_work_experience(work_data)}
                 elif "education" in parsed_data:
-                    transformed = {
-                        "education": transform_education(
-                            parsed_data.get("education", [])
-                        )
-                    }
+                    transformed = {"education": transform_education(parsed_data.get("education", []))}
                 elif (
                     "skills" in parsed_data
                     or "librariesFrameworks" in parsed_data
                     or "toolsPlatforms" in parsed_data
                     or "databases" in parsed_data
                 ):
-                    transformed = {
-                        "skills": transform_skills_comprehensive(parsed_data)
-                    }
+                    transformed = {"skills": transform_skills_comprehensive(parsed_data)}
                 elif "projects" in parsed_data or "projectsOpenSource" in parsed_data:
-                    transformed = {
-                        "projects": transform_projects_comprehensive(parsed_data)
-                    }
-                elif (
-                    "awards" in parsed_data
-                    or "achievements" in parsed_data
-                    or "honors_and_awards" in parsed_data
-                ):
+                    transformed = {"projects": transform_projects_comprehensive(parsed_data)}
+                elif "awards" in parsed_data or "achievements" in parsed_data or "honors_and_awards" in parsed_data:
                     awards_data = parsed_data.get(
                         "awards",
-                        parsed_data.get(
-                            "achievements", parsed_data.get("honors_and_awards", [])
-                        ),
+                        parsed_data.get("achievements", parsed_data.get("honors_and_awards", [])),
                     )
                     transformed = {"awards": transform_achievements(awards_data)}
                 else:
@@ -212,9 +188,7 @@ def transform_work_experience(work_list: list) -> list[dict]:
             transformed.append(
                 {
                     "name": item.get("name", ""),
-                    "position": item.get(
-                        "position", item.get("type", item.get("title", ""))
-                    ),
+                    "position": item.get("position", item.get("type", item.get("title", ""))),
                     "url": item.get("url", None),
                     "startDate": start_date,
                     "endDate": end_date,
@@ -257,11 +231,7 @@ def transform_education(edu_list: list) -> list[dict]:
                     {
                         "institution": item.get("institution", ""),
                         "url": item.get("url", None),
-                        "area": (
-                            item.get("degree", "").split(", ")[-1]
-                            if "," in item.get("degree", "")
-                            else None
-                        ),
+                        "area": (item.get("degree", "").split(", ")[-1] if "," in item.get("degree", "") else None),
                         "studyType": (
                             item.get("degree", "").split(", ")[0]
                             if "," in item.get("degree", "")
@@ -372,9 +342,7 @@ def transform_skills_comprehensive(parsed_data: dict) -> list[dict]:
 
     for field, category_name in skill_categories.items():
         if field in parsed_data and isinstance(parsed_data[field], list):
-            skills.append(
-                {"name": category_name, "level": None, "keywords": parsed_data[field]}
-            )
+            skills.append({"name": category_name, "level": None, "keywords": parsed_data[field]})
 
     return skills
 

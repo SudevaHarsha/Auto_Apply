@@ -69,9 +69,7 @@ def _pdf_to_markdown(pdf_path: str) -> str | None:
             ignore_alpha=True,
             ignore_graphics=True,
         )
-        logger.debug(
-            f"Extracted text from PDF: {len(resume_text) if resume_text else 0} characters"
-        )
+        logger.debug(f"Extracted text from PDF: {len(resume_text) if resume_text else 0} characters")
         return resume_text
 
 
@@ -103,9 +101,7 @@ async def _call_llm_for_section(
     """
     logger.debug(f"🔄 Extracting {section_name} section...")
 
-    section_system_message = template_manager.render_template(
-        "system_message", section_name_param=section_name
-    )
+    section_system_message = template_manager.render_template("system_message", section_name_param=section_name)
     if not section_system_message:
         logger.error(f"❌ Failed to render system message template for {section_name}")
         return None
@@ -175,9 +171,7 @@ async def extract_education_section(
     conn: psycopg.AsyncConnection, user_id: uuid.UUID, resume_text: str, *, adapter_factory=None
 ) -> dict | None:
     """Vendor ``PDFHandler.extract_education_section`` (pdf.py:150-159), async."""
-    prompt = template_manager.render_template(
-        "education", text_content=resume_text
-    )
+    prompt = template_manager.render_template("education", text_content=resume_text)
     if not prompt:
         logger.error("❌ Failed to render education template")
         return None
@@ -348,9 +342,7 @@ async def extract_profile(
     if not text_content:
         raise ExtractionFailedError("empty text extracted from pdf")
 
-    resume = await _extract_all_sections_async(
-        conn, user_id, text_content, adapter_factory=adapter_factory
-    )
+    resume = await _extract_all_sections_async(conn, user_id, text_content, adapter_factory=adapter_factory)
     if resume is None:
         raise ExtractionFailedError("section extraction failed")
     return resume

@@ -29,7 +29,6 @@
   "prompts/templates/skills.jinja": "6b717d44c74624efc9b4a6824d1ee614535ce2942b3acbd73e3f2f56cf00f52e",
   "prompts/templates/system_message.jinja": "f7f81539a729428eae01d191a317946bc976e9b60ceebe99d95d9878974ee0df",
   "prompts/templates/work.jinja": "5c22d469824f3ba42506eba4be88bd332e667db4659c0225a7d7c7f160e519e5",
-  "resume/sample.pdf": "6278601d92316e519c15327a19752c3ada0a2a33f1d956095be8ca645b51e678",
   "roles/software_engineering_intern/criteria.jinja": "640467cba56ab8b3bac565205cc25768e3dfd043853a8f53bf3ef3aa9c5c74ab",
   "roles/software_engineering_intern/role.json": "fc4541b926d86c56811afb88f60999aa1c42ed26b247ea2d30b67a6049156bee",
   "roles/software_engineering_intern/system_message.jinja": "002169bb2a5320f5b95ad71f755fbf36adf2011de80008e498b802c228c9bd72"
