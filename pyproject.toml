@@ -51,6 +51,12 @@ python_version = "3.12"
 exclude = ["vendor/"]
 warn_unused_configs = true
 
+# AGPL-3.0 byte-level file copy (ruff per-file-ignore above); mypy must not
+# report on the frozen vendored converter even when pulled in by imports.
+[[tool.mypy.overrides]]
+module = "backend.app.core_engine.pymupdf_rag_impl"
+ignore_errors = true
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]

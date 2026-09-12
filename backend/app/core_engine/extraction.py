@@ -132,6 +132,9 @@ async def _call_llm_for_section(
     try:
         parsed_data = _parse_section_json(response_text)
         logger.debug(f"✅ Successfully extracted {section_name} section")
+        if parsed_data is None:
+            logger.error(f"❌ Section parse returned null for {section_name}: {response_text}")
+            return None
         return transform_parsed_data(parsed_data)
     except json.JSONDecodeError as e:
         logger.error(f"❌ Error parsing JSON for {section_name} section: {e}")

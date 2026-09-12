@@ -201,6 +201,14 @@ async def test_extraction_idempotent(tmp_path) -> None:
         )
         usage_after_first = len(await _usage_rows(conn, uid))
         audits_after_first = await _audit_count(conn, uid, "profile_uploaded")
+        assert audits_after_first == 1, "fresh upload must write exactly one profile_uploaded audit"
+        async with DbContext(conn, uid).transaction() as db:
+            cur = await db.execute(
+                "SELECT details FROM audit_logs WHERE user_id = %s AND action = 'profile_uploaded'",
+                (str(uid),),
+            )
+            details = (await cur.fetchall())[0][0]
+        assert details.get("sha256") == SAMPLE_SHA256, "upload audit must carry the pdf sha256 detail"
         second = await svc.upload_profile(
             user_id=uid, pdf_path=str(VENDOR_PDF), sha256=SAMPLE_SHA256, filename="sample.pdf",
             adapter_factory=factory,

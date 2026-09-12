@@ -117,7 +117,7 @@ class ProfilesService:
             resume = await extract_profile(
                 self.conn,
                 user_id=user_id,
-                pdf_path=storage.original_pdf_path(user_id, profile_id),
+                pdf_path=str(storage.original_pdf_path(user_id, profile_id)),
                 adapter_factory=adapter_factory,
             )
         except Exception:
