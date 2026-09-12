@@ -50,7 +50,7 @@ RLS_EXEMPT = {"job_snapshots"}
 EXPECTED_POLICY_COUNT = 22  # 20 documented + D4 user_profiles + 026 auth_sessions
 
 _RE_TABLE = re.compile(r"^CREATE TABLE (?:IF NOT EXISTS )?(\w+)\s*\(", re.M)
-_RE_IDX = re.compile(r"^CREATE INDEX (idx_\w+)\b", re.M)
+_RE_IDX = re.compile(r"^CREATE (?:UNIQUE )?INDEX (idx_\w+)\b", re.M)
 _RE_POLICY = re.compile(r"^CREATE POLICY (\w+)\b", re.M)
 _RE_ENABLE = re.compile(r"^ALTER TABLE (\w+) ENABLE ROW LEVEL SECURITY", re.M)
 _RE_FORCE = re.compile(r"^ALTER TABLE (\w+) FORCE ROW LEVEL SECURITY", re.M)

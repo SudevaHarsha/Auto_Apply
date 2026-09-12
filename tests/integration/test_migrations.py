@@ -12,7 +12,7 @@ from db.run_migrations import (
 )
 from tests.parity import schema_parity
 
-ADMIN_URL = os.getenv("MIGRATE_DATABASE_URL", "postgresql://autoapply:autoapply@localhost:5432/autoapply")
+ADMIN_URL = os.getenv("MIGRATE_DATABASE_URL", "postgresql://autoapply:autoapply@localhost:5434/autoapply")
 SCRATCH_DB = "autoapply_ci_scratch"
 
 
@@ -30,7 +30,7 @@ def summary() -> dict:
 
 def test_migration_apply_and_verify(summary: dict) -> None:
     assert summary["tables"] == 21  # +026 auth_sessions
-    assert summary["indexes"] == 39  # +2 idx_auth_sessions_*
+    assert summary["indexes"] == 40  # +2 idx_auth_sessions_*, +1 idx_profiles_user_sha256 (028)
     assert summary["rls_enabled"] == 20
     assert summary["rls_forced"] == 20
     assert summary["policies"] == 22
@@ -50,7 +50,7 @@ def test_migrations_apply_twice_on_fresh_db() -> None:
             admin.execute(f"DROP DATABASE IF EXISTS {SCRATCH_DB} WITH (FORCE)")
             admin.execute(f"CREATE DATABASE {SCRATCH_DB}")
             applied, summary = migrate(scratch_url)
-            assert len(applied) == 27  # 001..027
+            assert len(applied) == 28  # 001..028
             assert summary["tables"] == 21
             assert summary["policies"] == 22
     finally:
@@ -122,12 +122,12 @@ def test_checkpoint_step_enum_is_exact() -> None:
     assert step_def.count("'") // 2 == len(expected), "unexpected extra step literals"
 
 
-def test_index_count_39() -> None:
+def test_index_count_40() -> None:
     with psycopg.connect(ADMIN_URL) as conn:
         count = conn.execute(
             "SELECT count(*) FROM pg_indexes WHERE schemaname = 'public' AND indexname LIKE 'idx\\_%'"
         ).fetchone()[0]
-    assert count == 39
+    assert count == 40
 
 
 def test_snapshot_fks_on_applications_and_jobs() -> None:

@@ -8,6 +8,7 @@ from typing import Any
 import httpx
 
 from backend.app.llm.adapters.base import ChatResponse
+from backend.app.llm.schema_dialects import gemini_response_schema
 
 
 class GeminiAdapter:
@@ -42,7 +43,7 @@ class GeminiAdapter:
         if json_mode:
             generation: dict[str, Any] = {"responseMimeType": "application/json"}
             if output_schema:
-                generation["responseSchema"] = output_schema
+                generation["responseSchema"] = gemini_response_schema(output_schema)
             body["generationConfig"] = generation
         headers = {"x-goog-api-key": api_key} if api_key else {}
         started = time.monotonic()

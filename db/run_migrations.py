@@ -26,7 +26,7 @@ DEFAULT_MIGRATE_URL = "postgresql://autoapply:autoapply@localhost:5432/autoapply
 #   D4 adds ENABLE+FORCE+policy for user_profiles  -> 21 policies, 19 RLS tables.
 #   026 adds auth_sessions (table + 2 idx_* + policy) -> 21/39/20/20/22.
 EXPECTED_TABLES = 21
-EXPECTED_IDX = 39
+EXPECTED_IDX = 40
 EXPECTED_RLS_TABLES = 20
 EXPECTED_POLICIES = 22
 RLS_FREE_TABLE = "job_snapshots"

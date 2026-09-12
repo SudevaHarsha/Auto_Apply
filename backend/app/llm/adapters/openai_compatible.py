@@ -8,6 +8,7 @@ from typing import Any
 import httpx
 
 from backend.app.llm.adapters.base import ChatResponse
+from backend.app.llm.schema_dialects import openai_compatible_schema
 
 OUTPUT_SCHEMA_NAME = "structured_output"
 _CHAT_COMPLETIONS = "/chat/completions"
@@ -63,7 +64,11 @@ class OpenAICompatibleAdapter:
             if output_schema:
                 body["response_format"] = {
                     "type": "json_schema",
-                    "json_schema": {"name": OUTPUT_SCHEMA_NAME, "strict": True, "schema": output_schema},
+                    "json_schema": {
+                        "name": OUTPUT_SCHEMA_NAME,
+                        "strict": True,
+                        "schema": openai_compatible_schema(output_schema),
+                    },
                 }
             else:
                 body["response_format"] = {"type": "json_object"}
