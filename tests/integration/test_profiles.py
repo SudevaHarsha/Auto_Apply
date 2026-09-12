@@ -34,7 +34,7 @@ from backend.app.db.context import DbContext
 from backend.app.llm.service import LlmProviderService
 from tests.doubles.mock_provider import http, ok, scripted_factory
 
-APP_URL = os.getenv("DATABASE_URL", "postgresql://app_user:changeme_in_production@localhost:5432/autoapply")
+APP_URL = os.getenv("DATABASE_URL", "postgresql://app_user:changeme_in_production@localhost:5435/autoapply")
 PASSWORD = "Str0ng!password"
 ROOT = Path(__file__).resolve().parents[2]
 # Committed copy of vendor/hiring_agent/resume/sample.pdf (the vendor tree

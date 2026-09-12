@@ -32,7 +32,7 @@ from backend.app.llm.service import LlmProviderService
 
 pytestmark = pytest.mark.live
 
-APP_URL = os.getenv("DATABASE_URL", "postgresql://app_user:changeme_in_production@localhost:5432/autoapply")
+APP_URL = os.getenv("DATABASE_URL", "postgresql://app_user:changeme_in_production@localhost:5435/autoapply")
 PASSWORD = "Str0ng!password"
 ROOT = Path(__file__).resolve().parents[2]
 LIVE_PDF_DIR = Path(os.getenv("LIVE_EXTRACTION_PDF_DIR", str(ROOT / "tests" / "live" / "pdf")))

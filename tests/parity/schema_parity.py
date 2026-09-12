@@ -37,7 +37,7 @@ GOLDEN = REPO / "tests" / "parity" / "golden" / "schema_golden.sql"
 COMPOSE = REPO / os.getenv("PARITY_COMPOSE", "infra/docker-compose.dev.yml")
 DB_SERVICE = os.getenv("PARITY_DB_SERVICE", "db")
 
-DEFAULT_MIGRATE_URL = "postgresql://autoapply:autoapply@localhost:5432/autoapply"
+DEFAULT_MIGRATE_URL = "postgresql://autoapply:autoapply@localhost:5435/autoapply"
 
 # S1 documented divergences (reconciled in the migrations, final-schema-preserving):
 #   D1: doc 007's discord ENABLE+policy block moved to 022 (tables created there).
