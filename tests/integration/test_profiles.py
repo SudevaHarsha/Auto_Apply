@@ -241,6 +241,12 @@ async def test_extraction_idempotent(tmp_path) -> None:
 
 
 # ================================================================= 3 — vendor untouched
+# Vendor tree is gitignored and local-only; the guard lets the I9 sha256 check
+# run on machines that have it cloned and skip where it cannot exist (CI/fresh clones).
+@pytest.mark.skipif(
+    not (ROOT / "vendor" / "hiring_agent").is_dir(),
+    reason="vendor tree gitignored and local-only; not present in CI/fresh clones",
+)
 async def test_vendor_untouched() -> None:
     manifest = json.loads(MANIFEST_PATH.read_text())
     for rel_path, expected_hash in manifest.items():

@@ -17,3 +17,5 @@ tests/live/pdf/
 .vscode/
 .coverage
 htmlcov/
+# vendored third-party source trees (cloned locally only — kept out of GitHub)
+vendor/
