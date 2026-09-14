@@ -529,7 +529,10 @@ async def extract_job(
             if cached is not None:
                 payload: dict[str, Any] = cached["payload"] if isinstance(cached.get("payload"), dict) else {}
                 job, created = await _get_or_create_for_user(
-                    core_repo, user_id, route, source,
+                    core_repo,
+                    user_id,
+                    route,
+                    source,
                     title=payload.get("title") or "",
                     company=payload.get("company") or "",
                 )
@@ -722,21 +725,31 @@ async def extract_job(
         h = content_hash(final_url_hash, final_hash_body)
         snapshot_id = await core_repo.upsert_snapshot(h, payload=payload, raw_text=raw_text)
         job, created = await _get_or_create_for_user(
-            core_repo, user_id, route, source,
+            core_repo,
+            user_id,
+            route,
+            source,
             title=payload.get("title") or "",
             company=payload.get("company") or "",
         )
         await core_repo.apply_snapshot(
-            job_id=job["id"], snapshot_id=snapshot_id, content_hash=h,
+            job_id=job["id"],
+            snapshot_id=snapshot_id,
+            content_hash=h,
         )
 
         if created:
             await _audit(
-                obs_repo, action="job_discovered", resource_type="job",
-                resource_id=job["id"], details={"url": route.url, "platform": route.platform},
+                obs_repo,
+                action="job_discovered",
+                resource_type="job",
+                resource_id=job["id"],
+                details={"url": route.url, "platform": route.platform},
             )
         await _audit(
-            obs_repo, action="job_extracted", resource_type="job",
+            obs_repo,
+            action="job_extracted",
+            resource_type="job",
             resource_id=job["id"],
             details={
                 "snapshot_id": str(snapshot_id),
@@ -788,14 +801,24 @@ async def refresh_job(
             fetched = await fetch_call(url)
         except Exception:
             await core_repo.mark_freshness(job_id, "stale")
-            await _audit(obs_repo, action="job_freshness_changed", resource_type="job", resource_id=job_id,
-                         details={"state": "stale", "reason": "fetch_failed"})
+            await _audit(
+                obs_repo,
+                action="job_freshness_changed",
+                resource_type="job",
+                resource_id=job_id,
+                details={"state": "stale", "reason": "fetch_failed"},
+            )
             return FreshnessResult(state="stale")
 
         if fetched.status_code == 404 or fetched.status_code >= 400:
             await core_repo.mark_freshness(job_id, "stale")
-            await _audit(obs_repo, action="job_freshness_changed", resource_type="job", resource_id=job_id,
-                         details={"state": "stale", "reason": f"http_{fetched.status_code}"})
+            await _audit(
+                obs_repo,
+                action="job_freshness_changed",
+                resource_type="job",
+                resource_id=job_id,
+                details={"state": "stale", "reason": f"http_{fetched.status_code}"},
+            )
             return FreshnessResult(state="stale")
 
         new_hash = content_hash(fetched.url, fetched.body)
@@ -804,12 +827,21 @@ async def refresh_job(
             return FreshnessResult(state="fresh")
 
         result = await extract_job(
-            conn, user_id, url,
-            fetch=fetch, render=render,
-            adapter_factory=adapter_factory, now=now,
+            conn,
+            user_id,
+            url,
+            fetch=fetch,
+            render=render,
+            adapter_factory=adapter_factory,
+            now=now,
         )
-        await _audit(obs_repo, action="job_freshness_changed", resource_type="job", resource_id=job_id,
-                     details={"state": "fresh", "old_hash": job.get("content_hash"), "new_hash": new_hash})
+        await _audit(
+            obs_repo,
+            action="job_freshness_changed",
+            resource_type="job",
+            resource_id=job_id,
+            details={"state": "fresh", "old_hash": job.get("content_hash"), "new_hash": new_hash},
+        )
         return FreshnessResult(state="fresh", snapshot_id=result.snapshot_id, hash_changed=True)
 
 
@@ -848,7 +880,11 @@ async def list_jobs(
     async with DbContext(conn, user_id).transaction() as db:
         repo = CoreEngineRepository(db)
         rows, next_cursor = await repo.list_jobs(
-            user_id, status=status, platform=platform, limit=limit, cursor=cursor,
+            user_id,
+            status=status,
+            platform=platform,
+            limit=limit,
+            cursor=cursor,
         )
         summaries = [
             JobSummary(
@@ -950,11 +986,7 @@ async def freshness_for_package(
         if last_fetched is None:
             return {"state": "stale", "blocked": True}
         now = datetime.now(UTC)
-        age = (
-            now - last_fetched.replace(tzinfo=UTC)
-            if last_fetched.tzinfo is None
-            else now - last_fetched
-        )
+        age = now - last_fetched.replace(tzinfo=UTC) if last_fetched.tzinfo is None else now - last_fetched
         if age <= timedelta(hours=6):
             return {"state": "ok(<6h)", "blocked": False}
         return {"state": job.get("freshness_state", "stale"), "blocked": True}

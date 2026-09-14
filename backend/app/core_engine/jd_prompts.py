@@ -83,8 +83,7 @@ def _render(key: str, *, fallback: str, **kwargs: str) -> str:
 def build_section_system(section: str, now_iso: str) -> str:
     """Per-section system message (S5 pattern); freshness date is injected here."""
     fallback = (
-        _SYSTEM_FRAGMENT
-        + f"Extract the section '{_SECTION_TITLES.get(section, section)}' of a job "
+        _SYSTEM_FRAGMENT + f"Extract the section '{_SECTION_TITLES.get(section, section)}' of a job "
         f"posting as the JSON shape below. {_FRESHNESS_LINE.format(iso_date=now_iso)} "
         "Never invent benefits, requirements, or salaries beyond the post."
     )
@@ -98,10 +97,7 @@ def build_section_system(section: str, now_iso: str) -> str:
 
 def build_section_prompt(section: str, cleaned_text: str) -> str:
     """Per-section user prompt; embeds the *trimmed* text Door 4 actually sends."""
-    fallback = (
-        f"Job postings text:\n\n{cleaned_text}\n\n"
-        f"Return the {_SECTION_TITLES.get(section, section)} JSON now."
-    )
+    fallback = f"Job postings text:\n\n{cleaned_text}\n\nReturn the {_SECTION_TITLES.get(section, section)} JSON now."
     return _render(
         _SECTION_TEMPLATES.get(section, "jd_header_core"),
         fallback=fallback,
@@ -111,8 +107,7 @@ def build_section_prompt(section: str, cleaned_text: str) -> str:
 
 def build_door5_system(now_iso: str) -> str:
     fallback = (
-        _SYSTEM_FRAGMENT
-        + f"Fill ONLY the missing critical fields listed by the caller — nothing "
+        _SYSTEM_FRAGMENT + f"Fill ONLY the missing critical fields listed by the caller — nothing "
         f"else. Return a single JSON object with exactly those keys (null if the "
         f"text does not state them). {_FRESHNESS_LINE.format(iso_date=now_iso)}"
     )

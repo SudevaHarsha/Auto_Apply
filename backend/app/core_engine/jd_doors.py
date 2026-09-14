@@ -36,17 +36,53 @@ LEVER_SINGLE_URL = LEVER_POSTINGS_URL + "/{job_id}"
 
 _BLOCK_TAGS = frozenset(
     {
-        "p", "div", "section", "article", "li", "ul", "ol", "table", "tr",
-        "h1", "h2", "h3", "h4", "h5", "h6", "blockquote", "pre", "br",
+        "p",
+        "div",
+        "section",
+        "article",
+        "li",
+        "ul",
+        "ol",
+        "table",
+        "tr",
+        "h1",
+        "h2",
+        "h3",
+        "h4",
+        "h5",
+        "h6",
+        "blockquote",
+        "pre",
+        "br",
     }
 )
 # Trim set — tag-based sharpen (D36): shed nav/ads/scripts, keep article/main.
 _BOILERPLATE_TAGS = frozenset(
     {
-        "script", "style", "noscript", "template", "svg", "form", "nav",
-        "header", "footer", "aside", "button", "iframe", "video", "audio",
-        "canvas", "object", "embed", "select", "input", "textarea", "label",
-        "dialog", "figure", "figcaption",
+        "script",
+        "style",
+        "noscript",
+        "template",
+        "svg",
+        "form",
+        "nav",
+        "header",
+        "footer",
+        "aside",
+        "button",
+        "iframe",
+        "video",
+        "audio",
+        "canvas",
+        "object",
+        "embed",
+        "select",
+        "input",
+        "textarea",
+        "label",
+        "dialog",
+        "figure",
+        "figcaption",
     }
 )
 _KEEP_TAGS: frozenset[str] = frozenset()  # no whitelist needed; trim-set shedding is stricter
@@ -259,10 +295,7 @@ async def _door1_lever(
 def _lever_posting_to_result(posting: dict[str, Any], route: DoorRoute) -> DoorResult:
     categories = posting.get("categories") or {}
     locations = categories.get("allLocations") or []
-    location = (
-        categories.get("location")
-        or (", ".join(name for name in locations if name) if locations else None)
-    )
+    location = categories.get("location") or (", ".join(name for name in locations if name) if locations else None)
     structured: dict[str, Any] = {
         "title": _clean_value(_clean_str(posting.get("text"))),
         "company": _clean_value(_clean_str(posting.get("contactCompanyName") or route.slug)),
@@ -285,9 +318,7 @@ def _lever_posting_to_result(posting: dict[str, Any], route: DoorRoute) -> DoorR
     )
     description_html = _clean_str(posting.get("descriptionHtml")) or _clean_str(posting.get("description"))
     additional = _clean_str(posting.get("additional"))
-    html = "<div>" + "".join(
-        part for part in [description_html, lists_html, additional] if part
-    ) + "</div>"
+    html = "<div>" + "".join(part for part in [description_html, lists_html, additional] if part) + "</div>"
     return DoorResult(door=1, structured=structured, html=html or None)
 
 
@@ -406,7 +437,7 @@ def _json_ld_salary(job: dict[str, Any]) -> dict[str, Any] | None:
             }
         except (TypeError, ValueError):
             return None
-    if isinstance(value, (int, float)):
+    if isinstance(value, int | float):
         return {"min": float(value), "max": float(value), "currency": currency, "period": period}
     if isinstance(value, str):
         match = re.search(r"-?\d+(?:\.\d+)?", value)
@@ -574,8 +605,7 @@ def looks_like_js_shell(text: str, html: str | bytes) -> bool:
         return False
     chunk = html.decode("utf-8", errors="replace") if isinstance(html, bytes) else (html or "")
     has_mount_marker = any(
-        marker in chunk
-        for marker in ('id="root"', "id='root'", 'id="app"', "id='app'", "<noscript>")
+        marker in chunk for marker in ('id="root"', "id='root'", 'id="app"', "id='app'", "<noscript>")
     )
     return bool(has_mount_marker) and len(text.strip()) < 500
 

@@ -195,9 +195,7 @@ async def _run_one(conn: psycopg.AsyncConnection, user_id: uuid.UUID, url: str) 
     else:
         # 4 mandatory Door-4 section calls + at most one retry per section + 0-1 Door 5.
         if new_calls < 4:
-            pytest.skip(
-                f"{url}: only {new_calls} successful LLM calls — partial provider outage (environmental)"
-            )
+            pytest.skip(f"{url}: only {new_calls} successful LLM calls — partial provider outage (environmental)")
         assert new_calls <= 10, (
             f"{url}: expected 4-10 successful usage rows (4 sections + retries + Door 5), got {new_calls}"
         )

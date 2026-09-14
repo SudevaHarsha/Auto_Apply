@@ -196,18 +196,14 @@ async def fetch_http(
     merged_headers = {**_DEFAULT_HEADERS, **(headers or {})}
     own_client = False
     if client is None:
-        client = httpx.AsyncClient(
-            follow_redirects=False, timeout=fetch_timeout, headers=merged_headers
-        )
+        client = httpx.AsyncClient(follow_redirects=False, timeout=fetch_timeout, headers=merged_headers)
         own_client = True
 
     current_url = url
     robots_decision: bool | None = None
     try:
         if respect_robots:
-            robots_decision = await _fetch_and_check_robots(
-                url, client=client, fetch_timeout=fetch_timeout
-            )
+            robots_decision = await _fetch_and_check_robots(url, client=client, fetch_timeout=fetch_timeout)
             if robots_decision is True:
                 raise FetchFailedError(
                     "robots.txt disallows this path",
@@ -219,9 +215,7 @@ async def fetch_http(
                     "URL resolves to a private/loopback/link-local target (SSRF guard)",
                     details={"url": current_url},
                 )
-            resp = await client.get(
-                current_url, headers=merged_headers, timeout=fetch_timeout
-            )
+            resp = await client.get(current_url, headers=merged_headers, timeout=fetch_timeout)
             if resp.status_code in (301, 302, 303, 307, 308):
                 location = resp.headers.get("location")
                 if not location:
@@ -252,9 +246,7 @@ async def fetch_http(
             await client.aclose()
 
 
-_ROBOTS_CACHE: dict[
-    str, tuple[datetime, urllib.robotparser.RobotFileParser | None]
-] = {}
+_ROBOTS_CACHE: dict[str, tuple[datetime, urllib.robotparser.RobotFileParser | None]] = {}
 
 
 @asynccontextmanager
@@ -265,9 +257,7 @@ async def _maybe_own_client(
     if client is not None:
         yield client
         return
-    own = httpx.AsyncClient(
-        follow_redirects=True, timeout=ROBOTS_FETCH_TIMEOUT_SECONDS
-    )
+    own = httpx.AsyncClient(follow_redirects=True, timeout=ROBOTS_FETCH_TIMEOUT_SECONDS)
     try:
         yield own
     finally:

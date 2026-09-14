@@ -115,6 +115,7 @@ async def _browser_impl(url: str, timeout_ms: int) -> FetchedResult:
 
 async def _block_noisy_resources(page: Any) -> None:
     """Ported from Firecrawl's browser route: shed third-party/tracking payloads."""
+
     async def _handle(route: Any) -> None:
         request = route.request
         url = request.url.lower()

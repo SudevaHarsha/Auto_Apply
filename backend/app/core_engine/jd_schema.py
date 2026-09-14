@@ -169,7 +169,7 @@ SECTION_MODELS: dict[str, type[BaseModel]] = {
 
 def _is_empty(value: Any) -> bool:
     """D40: ``None``/``""``/``[]``/``{}`` count as the LLM leaving the field empty."""
-    return value is None or (isinstance(value, (list, dict, str)) and not value)
+    return value is None or (isinstance(value, list | dict | str) and not value)
 
 
 def merge_over(accumulator: dict[str, Any], section: dict[str, Any]) -> dict[str, Any]:
