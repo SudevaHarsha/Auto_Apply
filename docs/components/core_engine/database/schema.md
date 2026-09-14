@@ -58,14 +58,15 @@ CREATE INDEX idx_jobs_freshness ON jobs(user_id, freshness_state);
 
 Immutable, shared, RLS-exempt table backing both the extraction cache and JD truth/versioning.
 
-> **Canonical source:** `docs/database/schema.md` — migration 025.
+> **Canonical source:** `docs/database/schema.md` — migrations 025 (table), 029 (`raw_text`).
 
 ```sql
 CREATE TABLE job_snapshots (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     content_hash TEXT NOT NULL UNIQUE,
     payload JSONB NOT NULL,
-    captured_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    captured_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    raw_text TEXT
 );
 ```
 

@@ -225,7 +225,8 @@ CREATE TABLE public.job_snapshots (
     id uuid DEFAULT public.uuid_generate_v4() NOT NULL,
     content_hash text NOT NULL,
     payload jsonb NOT NULL,
-    captured_at timestamp with time zone DEFAULT now() NOT NULL
+    captured_at timestamp with time zone DEFAULT now() NOT NULL,
+    raw_text text
 );
 CREATE TABLE public.jobs (
     id uuid DEFAULT public.uuid_generate_v4() NOT NULL,

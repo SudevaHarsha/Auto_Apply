@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Site Reliability Engineer II - GlobalMatch</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    /* ------------------------------------------------------------------
+       GlobalMatch edge-delivery stylesheet. Minified in production.
+       (kept verbose here to make this fixture structurally heavy while the
+       stripped text stays small - proves boilerplate shedding)
+       ------------------------------------------------------------------ */
+    :root { --brand: #2b6cb0; --ink: #1a202c; --muted: #718096; --bg: #f7fafc; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font: 16px/1.6 -apple-system, "Segoe UI", Roboto, sans-serif; color: var(--ink); background: var(--bg); }
+    .shell { max-width: 1180px; margin: 0 auto; padding: 0 24px 96px; }
+    .hero { padding: 56px 0 32px; }
+    .hero h1 { font-size: 2.25rem; letter-spacing: -0.02em; color: var(--brand); }
+    .btn { display: inline-block; padding: 10px 18px; border-radius: 6px; background: var(--brand); color: #fff; }
+    .card { background: #fff; border-radius: 8px; padding: 24px; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+    .chip { display: inline-block; padding: 4px 10px; background: #ebf4ff; color: var(--brand); border-radius: 999px; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 24px; }
+    .footer-cta { margin-top: 64px; text-align: center; }
+    /* ------------------------------------------------------------------
+       GlobalMatch edge-delivery stylesheet part II (kept verbose)
+       ------------------------------------------------------------------ */
+    .badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: .75rem; }
+    .badge--warn { background: #fefcbf; color: #975a16; }
+    .badge--ok { background: #c6f6d5; color: #22543d; }
+    .table { width: 100%; border-collapse: collapse; }
+    .table th, .table td { border-bottom: 1px solid #e2e8f0; padding: 8px 12px; text-align: left; }
+    @media (prefers-reduced-motion: no-preference) {
+      .card { transition: box-shadow .2s ease; }
+    }
+    /* ------------------------------------------------------------------
+       GlobalMatch edge-delivery stylesheet part III (kept verbose)
+       ------------------------------------------------------------------ */
+    .stack { display: flex; flex-direction: column; gap: 16px; }
+    .stack--row { flex-direction: row; flex-wrap: wrap; }
+    .u-muted { color: var(--muted); }
+    .divider { border: none; border-top: 1px solid #e2e8f0; margin: 24px 0; }
+    .list--none { list-style: none; }
+    .list--bullets { list-style: disc; padding-left: 24px; }
+    .modal { position: fixed; inset: 0; background: rgba(15,23,42,.55); display: none; align-items: center; justify-content: center; z-index: 40; }
+    .modal.is-open { display: flex; }
+    .modal__card { background: #fff; border-radius: 12px; max-width: 560px; width: 100%; padding: 28px; box-shadow: 0 24px 48px rgba(0,0,0,.18); }
+    .modal__title { font-size: 1.25rem; font-weight: 600; margin-bottom: 12px; }
+    .modal__actions { display: flex; gap: 12px; margin-top: 20px; justify-content: flex-end; }
+    .tooltip { position: relative; display: inline-block; }
+    .tooltip__bubble { position: absolute; bottom: 120%; left: 50%; transform: translateX(-50%); background: #1a202c; color: #fff; padding: 6px 10px; border-radius: 6px; font-size: .75rem; white-space: nowrap; }
+    .tooltip__bubble::after { content: ""; position: absolute; top: 100%; left: 50%; transform: translateX(-50%); border: 6px solid transparent; border-top-color: #1a202c; }
+    .kbd { display: inline-block; padding: 2px 6px; border: 1px solid #cbd5e0; border-bottom-width: 2px; border-radius: 4px; background: #fff; font-size: .8rem; }
+    .flag { display: inline-block; width: 18px; height: 12px; border-radius: 2px; margin-right: 8px; vertical-align: -1px; }
+    .alert { padding: 12px 16px; border-radius: 8px; margin: 16px 0; }
+    .alert--info { background: #ebf8ff; border: 1px solid #90cdf4; color: #2b6cb0; }
+    .alert--warn { background: #fffaf0; border: 1px solid #fbd38d; color: #c05621; }
+    .alert--err { background: #fff5f5; border: 1px solid #fc8181; color: #c53030; }
+    .breadcrumb { display: flex; gap: 6px; font-size: .85rem; color: var(--muted); }
+    .breadcrumb__sep { color: #a0aec0; }
+    .skeleton { background: linear-gradient(90deg, #edf2f7 25%, #e2e8f0 37%, #edf2f7 63%); background-size: 400% 100%; animation: shimmer 1.4s ease infinite; border-radius: 6px; }
+    @keyframes shimmer { 0% { background-position: 100% 50%; } 100% { background-position: 0 50%; } }
+    .stepper { display: flex; align-items: center; gap: 8px; }
+    .stepper__dot { width: 10px; height: 10px; border-radius: 50%; background: #cbd5e0; }
+    .stepper__dot.is-active { background: var(--brand); }
+    .stepper__line { flex: 1; height: 2px; background: #e2e8f0; }
+    .avatar { border-radius: 50%; overflow: hidden; }
+    .avatar--sm { width: 32px; height: 32px; }
+    .avatar--lg { width: 64px; height: 64px; }
+    .rating { color: #d69e2e; letter-spacing: 2px; }
+  </style>
+</head>
+<body>
+<!-- GlobalMatch careers shell - careers.globalmatch.example (fixture-only) -->
+<div class="shell">
+  <a class="btn" href="/careers/sreroles" aria-hidden="true">Careers</a>
+  <svg aria-hidden="true" class="logo-mark" xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 48 48">
+    <path d="M24 2c-9.94 0-18 8.06-18 18 0 9.94 8.06 18 18 18 9.94 0 18-8.06 18-18C42 10.06 33.94 2 24 2zm0 6c6.627 0 12 5.373 12 12 0 6.627-5.373 12-12 12S12 26.627 12 20 17.373 8 24 8zm0 5c-3.866 0-7 3.134-7 7 0 3.866 3.134 7 7 7 3.866 0 7-3.134 7-7 0-3.866-3.134-7-7-7z"/>
+    <path d="M24 20l6-9 6 9-6 9-6-9zm12 8l4-6 4 6-4 6-4-6zM12 14l-6-9-6 9 6 9 6-9z"/>
+  </svg>
+  <script src="/assets/www.js" defer></script>
+  <script src="/assets/telemetry.js" defer></script>
+  <!--
+    renderer bootstrap for the careers SPA (fixture-only). The posting text below
+    is delivered by the server so no client-side JS is required to read it.
+  -->
+  <header class="hero">
+    <h1>Site Reliability Engineer II</h1>
+    <p class="u-muted">GlobalMatch · Remote (North America) · Full-time</p>
+  </header>
+  <main class="card">
+    <p>GlobalMatch is hiring a Site Reliability Engineer II who can operate the
+    edge platform that routes billions of requests. We are looking for a hands-on
+    operator.</p>
+    <h2>What you will do</h2>
+    <ul class="list--bullets">
+      <li>Own availability for the request-routing mesh.</li>
+      <li>Deliver error budget reporting for the platform review.</li>
+      <li>Run incident response rotations with the on-call squad.</li>
+    </ul>
+    <h2>Requirements</h2>
+    <ul class="list--bullets">
+      <li>3+ years running Linux fleets in production.</li>
+      <li>Comfort with Kubernetes and Terraform.</li>
+      <li>Strong debugging discipline across the stack.</li>
+    </ul>
+  </main>
+  <div class="footer-cta">
+    <span>GlobalMatch is an equal-opportunity employer.</span>
+  </div>
+</div>
+<script src="/assets/router.js" defer></script>
+<script src="/assets/vendors~www.js" defer></script>
+<script src="/assets/main.20260901.ae71.js" defer></script>
+</body>
+</html>

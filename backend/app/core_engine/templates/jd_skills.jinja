@@ -1,0 +1,23 @@
+Extract the required and preferred skills for the role.
+
+--- The input job-posting text starts here ---
+
+{{ text_content }}
+
+--- The input job-posting text ends here ---
+
+Return ONLY a JSON object with this structure:
+{
+  "skills": {
+    "required": ["skill A", "skill B"],
+    "preferred": ["skill C"]
+  }
+}
+
+Rules:
+- **required** = skills framed as must-haves ("you need", "must have", "requirements:", "strong experience with", "proficiency in").
+- **preferred** = skills framed as nice-to-haves ("nice to have", "bonus", "preferred", "familiarity with", "a plus", "exposure to").
+- Include languages, frameworks, tools, and platforms EXACTLY as named (e.g. "Python", "React", "Kubernetes", "Spark").
+- Keep tightly coupled concepts as one entry when they travel together as a single named stack (e.g. "machine learning", "AWS EMR").
+- Do NOT add generic traits such as "communication" or "teamwork" unless the text explicitly lists them as a skill.
+- Do NOT fabricate technologies that are not in the text.

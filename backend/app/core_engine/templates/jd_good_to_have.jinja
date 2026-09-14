@@ -1,0 +1,19 @@
+Extract the nice-to-haves and the application / screening hints of the posting.
+
+--- The input job-posting text starts here ---
+
+{{ text_content }}
+
+--- The input job-posting text ends here ---
+
+Return ONLY a JSON object with this structure:
+{
+  "good_to_have": ["nice-to-have 1", "nice-to-have 2"],
+  "screening_question_hints": ["question or detail the application asks about"]
+}
+
+Rules:
+- **good_to_have**: include ONLY items the posting explicitly marks as preferred / bonus / plus / "nice to have". Return an empty array if none.
+- **screening_question_hints**: short notes about things the application process asks candidates to answer or submit (e.g. "Tell us about a time you...", "include a cover letter", "please submit a portfolio", "salary expectation"). Return an empty array if none.
+- Do not move responsibilities or required skills into either list.
+- Do not invent hints or nice-to-haves beyond the post.

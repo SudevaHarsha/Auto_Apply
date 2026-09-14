@@ -1,0 +1,16 @@
+Missing critical fields to fill: {{ missing_criticals }}
+
+--- The input job-posting text starts here ---
+
+{{ text_content }}
+
+--- The input job-posting text ends here ---
+
+Return ONLY a JSON object whose keys are exactly: {{ missing_criticals }}.
+
+Rules:
+- Each key you return must be one of the missing fields listed above - nothing else.
+- Fill the field from the text above if it is stated; use null when the text does not state it.
+- e.g. {"responsibilities": ["Own the pipeline"], "skills": {"required": ["Go"], "preferred": []}}.
+
+**CRITICAL**: Return ONLY that JSON object. No prose, no markdown fences.

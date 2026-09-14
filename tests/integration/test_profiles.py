@@ -241,18 +241,27 @@ async def test_extraction_idempotent(tmp_path) -> None:
 
 
 # ================================================================= 3 — vendor untouched
-# Vendor tree is gitignored and local-only; the guard lets the I9 sha256 check
-# run on machines that have it cloned and skip where it cannot exist (CI/fresh clones).
+# Vendor trees are gitignored and local-only; the guard lets the I9 sha256 check
+# run on machines that have them cloned and skips each tree where it cannot exist
+# (CI/fresh clones). The manifest pins the pattern-ported trees: the hiring-agent
+# extractor (S5) and the firecrawl reference (S6, D33).
 @pytest.mark.skipif(
-    not (ROOT / "vendor" / "hiring_agent").is_dir(),
-    reason="vendor tree gitignored and local-only; not present in CI/fresh clones",
+    not any((ROOT / "vendor" / tree).is_dir() for tree in ("hiring_agent", "firecrawl")),
+    reason="vendor trees gitignored and local-only; not present in CI/fresh clones",
 )
 async def test_vendor_untouched() -> None:
     manifest = json.loads(MANIFEST_PATH.read_text())
-    for rel_path, expected_hash in manifest.items():
-        full = ROOT / "vendor" / "hiring_agent" / rel_path
-        actual_hash = hashlib.sha256(full.read_bytes()).hexdigest()
-        assert actual_hash == expected_hash, f"vendor file {rel_path} modified: {actual_hash} != {expected_hash}"
+    for tree, entries in manifest.items():
+        tree_dir = ROOT / "vendor" / tree
+        if not tree_dir.is_dir():
+            continue  # this tree not cloned on this machine (I9 skip)
+        for rel_path, expected_hash in entries.items():
+            full = tree_dir / rel_path
+            assert full.is_file(), f"vendor file missing: {tree}/{rel_path}"
+            actual_hash = hashlib.sha256(full.read_bytes()).hexdigest()
+            assert actual_hash == expected_hash, (
+                f"vendor file {tree}/{rel_path} modified: {actual_hash} != {expected_hash}"
+            )
 
 
 # ======================================================== 3b — CRUD + RLS cross-user

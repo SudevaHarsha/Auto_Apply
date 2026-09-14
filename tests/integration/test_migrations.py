@@ -50,7 +50,7 @@ def test_migrations_apply_twice_on_fresh_db() -> None:
             admin.execute(f"DROP DATABASE IF EXISTS {SCRATCH_DB} WITH (FORCE)")
             admin.execute(f"CREATE DATABASE {SCRATCH_DB}")
             applied, summary = migrate(scratch_url)
-            assert len(applied) == 28  # 001..028
+            assert len(applied) == 29  # 001..029
             assert summary["tables"] == 21
             assert summary["policies"] == 22
     finally:
@@ -88,7 +88,7 @@ def test_job_snapshots_columns_and_unique_hash() -> None:
         unique = conn.execute(
             "SELECT count(*) FROM pg_constraint WHERE conrelid = 'job_snapshots'::regclass AND contype = 'u'"
         ).fetchone()[0]
-    assert cols == {"id", "content_hash", "payload", "captured_at"}
+    assert cols == {"id", "content_hash", "payload", "captured_at", "raw_text"}
     assert "user_id" not in cols  # shared cache invariant: no owner column
     assert unique == 1  # UNIQUE(content_hash)
 
