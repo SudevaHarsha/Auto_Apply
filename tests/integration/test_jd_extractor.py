@@ -905,24 +905,27 @@ async def test_refresh_changed_hash_version_bumps(monkeypatch) -> None:
         url = _gh_url()
         monkeypatch.setenv("JD_CACHE_ENABLED", "0")  # no cache fast-path while refresh re-extracts
         factory, adapters, _ = scripted_factory({"gemini": _four_ok()})
-        result = await jd_ex.extract_job(
-            conn,
-            user.id,
-            url,
-            fetch=_fetch_stub(_fixture("greenhouse.html")),
-            adapter_factory=factory,
-        )
+        door1 = _door1_stub({})  # door-1 off (zero network): greenhouse URL resolved by Doors 2-4
+        with patch("backend.app.core_engine.jd_extractor.door1_greenhouse", new=door1):
+            result = await jd_ex.extract_job(
+                conn,
+                user.id,
+                url,
+                fetch=_fetch_stub(_fixture("greenhouse.html")),
+                adapter_factory=factory,
+            )
         old_snap = result.snapshot_id
         old_hash = (await jd_ex.get_job(conn, user.id, result.job["id"])).content_hash  # type: ignore[union-attr]
 
         factory2, adapters2, _ = scripted_factory({"gemini": _four_ok(header={"location": "Toronto"})})
-        outcome = await jd_ex.refresh_job(
-            conn,
-            user.id,
-            result.job["id"],
-            fetch=_fetch_stub(_fixture("workday_ats.html")),
-            adapter_factory=factory2,
-        )
+        with patch("backend.app.core_engine.jd_extractor.door1_greenhouse", new=door1):
+            outcome = await jd_ex.refresh_job(
+                conn,
+                user.id,
+                result.job["id"],
+                fetch=_fetch_stub(_fixture("workday_ats.html")),
+                adapter_factory=factory2,
+            )
         assert outcome.state == "fresh"
         assert outcome.hash_changed is True
         assert outcome.snapshot_id != old_snap
