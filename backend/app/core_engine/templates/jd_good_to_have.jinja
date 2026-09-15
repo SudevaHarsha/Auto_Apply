@@ -1,4 +1,5 @@
-Extract the nice-to-haves and the application / screening hints of the posting.
+Extract the posting's nice-to-haves FIRST (the primary output), then the
+application / screening hints, then any important leftover categories.
 
 --- The input job-posting text starts here ---
 
@@ -9,11 +10,16 @@ Extract the nice-to-haves and the application / screening hints of the posting.
 Return ONLY a JSON object with this structure:
 {
   "good_to_have": ["nice-to-have 1", "nice-to-have 2"],
-  "screening_question_hints": ["question or detail the application asks about"]
+  "screening_question_hints": ["question or detail the application asks about"],
+  "other": [
+    {"name": "Category name", "values": ["single value"]},
+    {"name": "Another category", "values": ["value 1", "value 2"]}
+  ]
 }
 
 Rules:
-- **good_to_have**: include ONLY items the posting explicitly marks as preferred / bonus / plus / "nice to have". Return an empty array if none.
+- **good_to_have** (PRIMARY OUTPUT — always fill this first): list EVERY item in any section of the posting explicitly marked as preferred / bonus / plus / "nice to have" / "good to have" / "desired" / "would be great". Do not leave it empty when such a section exists — scan for its heading and copy its bullets verbatim. Return an empty array ONLY when the posting truly has no such section.
 - **screening_question_hints**: short notes about things the application process asks candidates to answer or submit (e.g. "Tell us about a time you...", "include a cover letter", "please submit a portfolio", "salary expectation"). Return an empty array if none.
+- **other**: capture important content the other sections already extracted do NOT cover (e.g. "About the Role", "What You'd Build", "Why Join", "Application process", "Duration", "Compensation notes"). Each entry is an object with a `name` (the category title) and a `values` array; put every point for that category in the `values` array (even a single point goes in a one-element array). Use at most 8 categories. NEVER include navigation, footer, or boilerplate text. NEVER re-list anything already in responsibilities, skills, screening_question_hints, or good_to_have. NEVER put "nice to have" / preferred / bonus items here — those ALWAYS belong in good_to_have. Return an empty array if nothing important is left.
 - Do not move responsibilities or required skills into either list.
 - Do not invent hints or nice-to-haves beyond the post.

@@ -26,7 +26,7 @@ _SECTION_TITLES: dict[str, str] = {
     "header_core": "header / core facts",
     "responsibilities": "day-to-day responsibilities",
     "skills": "required and preferred skills",
-    "good_to_have": "nice-to-haves and screening hints",
+    "good_to_have": "nice-to-haves, screening hints, and leftover categories (other)",
 }
 
 _SECTION_TEMPLATES: dict[str, str] = {

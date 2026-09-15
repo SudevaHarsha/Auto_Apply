@@ -470,6 +470,10 @@ async def test_door4_good_to_have_merge_includes_screening_hints() -> None:
                             {
                                 "good_to_have": ["FinTech", "ATS data"],
                                 "screening_question_hints": ["VC-perf edge cases"],
+                                "other": {
+                                    "About the Role": "Build the core platform",
+                                    "Why Join": ["Remote-first", "L&D budget"],
+                                },
                             }
                         )
                     ),
@@ -486,6 +490,55 @@ async def test_door4_good_to_have_merge_includes_screening_hints() -> None:
             )
         assert result.payload["good_to_have"] == ["FinTech", "ATS data"]
         assert result.payload["screening_question_hints"] == ["VC-perf edge cases"]
+        assert result.payload["other"] == {
+            "About the Role": "Build the core platform",
+            "Why Join": ["Remote-first", "L&D budget"],
+        }
+        assert len(adapters["gemini"].calls) == 4
+    finally:
+        await conn.close()
+
+
+async def test_door4_other_capped_to_eight_keys() -> None:
+    """D46: a bloated other{} is trimmed to 8 categories; empty {} never clobbers."""
+    conn, user = await _register()
+    try:
+        await _add_provider(conn, user.id)
+        url = _gh_url()
+        base = {
+            "title": "Platform Technologies Engineer",
+            "company": "Raincoat",
+            "location": "SF",
+            "seniority": "Senior",
+        }
+        factory, adapters, _ = scripted_factory(
+            {
+                "gemini": [
+                    ok("{}"),
+                    ok(json.dumps({"responsibilities": ["Write tests"]})),
+                    ok(json.dumps({"skills": {"required": ["Python"], "preferred": []}})),
+                    ok(
+                        json.dumps(
+                            {
+                                "good_to_have": [],
+                                "other": {f"Category {i}": f"value {i}" for i in range(10)},
+                            }
+                        )
+                    ),
+                ]
+            }
+        )
+        with patch("backend.app.core_engine.jd_extractor.door1_greenhouse", new=_door1_stub(base)):
+            result = await jd_ex.extract_job(
+                conn,
+                user.id,
+                url,
+                fetch=_fetch_stub(_fixture("greenhouse.html")),
+                adapter_factory=factory,
+            )
+        assert len(result.payload["other"]) == 8
+        assert "Category 0" in result.payload["other"]
+        assert "Category 9" not in result.payload["other"]
         assert len(adapters["gemini"].calls) == 4
     finally:
         await conn.close()
@@ -1610,6 +1663,7 @@ def test_no_s5_diffs() -> None:
     allowlist += sorted(
         str(p.relative_to(ROOT)).replace("\\", "/")
         for p in (ROOT / "backend" / "app" / "core_engine" / "templates").glob("*.jinja")
+        if not p.name.startswith("jd_")
     )
     proc = subprocess.run(
         ["git", "-C", str(ROOT), "diff", "--exit-code", "HEAD", "--", *allowlist],

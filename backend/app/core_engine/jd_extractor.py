@@ -53,9 +53,11 @@ from backend.app.core_engine.jd_prompts import (
     build_section_system,
 )
 from backend.app.core_engine.jd_schema import (
+    _OTHER_MAX_KEYS,
     CURRENT_SCHEMA_VERSION,
     SECTION_MODELS,
     DoorRoute,
+    GoodToHaveSection,
     StructuredJD,
     merge_over,
 )
@@ -394,13 +396,31 @@ async def _run_door4_section(
     user_id: uuid.UUID,
     adapter_factory: Callable[[str], Any] | None,
     iso_now: str,
+    obs_repo: ObservabilityRepository | None = None,
+    url: str | None = None,
 ) -> tuple[dict[str, Any] | None, str | None]:
     """One focused ``route_llm_request`` call (S5 pattern, ``extraction._call_llm_for_section``)."""
     model = SECTION_MODELS[section]
+    model_name = model.__name__
     system = build_section_system(section, iso_now)
     trimmed = trim_to_token_limit(text, _SECTION_MAX_INPUT_TOKENS)
     prompt = build_section_prompt(section, trimmed.text)
     planned = trimmed.estimated_tokens + _estimate_tokens(system)
+
+    logger.info(
+        "jd_door4_section_start url=%s section=%s model=%s input_chars=%d input_tokens=%d planned_tokens=%d "
+        "calls_used=%d/%d budget_used=%d/%d",
+        url,
+        section,
+        model_name,
+        len(trimmed.text),
+        trimmed.estimated_tokens,
+        planned,
+        budget.call_count,
+        _MAX_CALLS,
+        budget.used_tokens,
+        budget.token_budget,
+    )
 
     budget.guard_plan(planned)
     budget.consume_call()
@@ -415,30 +435,145 @@ async def _run_door4_section(
             output_schema=model.model_json_schema(),
             adapter_factory=adapter_factory,
         )
-    except ProvidersExhaustedError:
+    except ProvidersExhaustedError as exc:
         budget.accrue(planned, 0)
+        attempts = exc.details.get("attempts") or []
+        logger.error(
+            "jd_door4_section_exhausted url=%s section=%s model=%s planned_tokens=%d attempts=%r",
+            url,
+            section,
+            model_name,
+            planned,
+            attempts,
+        )
+        if obs_repo is not None:
+            await obs_repo.insert_error(
+                component="jd_extractor",
+                error_type="door4_providers_exhausted",
+                severity="HIGH",
+                message=f"door-4 section {section!r} exhausted every configured provider",
+                context={
+                    "url": url,
+                    "section": section,
+                    "model": model_name,
+                    "planned_tokens": planned,
+                    "calls_used": budget.call_count,
+                    "budget_used_tokens": budget.used_tokens,
+                    "attempts": attempts,
+                    "providers_consumed": exc.details.get("providers_consumed"),
+                    "error_message": exc.message,
+                },
+                next_action="check provider quota/health; the section was skipped and left unmerged",
+            )
         return None, f"{section}: router_exhausted"
-    except Exception:  # noqa: BLE001
+    except Exception as exc:  # noqa: BLE001
         budget.accrue(planned, 0)
+        logger.exception("jd_door4_section_router_error url=%s section=%s model=%s", url, section, model_name)
+        if obs_repo is not None:
+            await obs_repo.insert_error(
+                component="jd_extractor",
+                error_type="door4_router_error",
+                severity="HIGH",
+                message=f"door-4 section {section!r} failed in the router: {type(exc).__name__}: {exc}",
+                context={"url": url, "section": section, "model": model_name, "planned_tokens": planned},
+                next_action="inspect the router exception class/message above",
+            )
         return None, f"{section}: router_error"
 
     budget.accrue(resp.prompt_tokens or 0, resp.completion_tokens or 0)
 
     if _is_refusal(resp.content or ""):
+        logger.warning("jd_door4_section_refused url=%s section=%s provider=%s", url, section, resp.provider)
+        if obs_repo is not None:
+            await obs_repo.insert_error(
+                component="jd_extractor",
+                error_type="door4_refused",
+                severity="MEDIUM",
+                message=f"door-4 section {section!r} was refused by {resp.provider}",
+                context={
+                    "url": url,
+                    "section": section,
+                    "provider": resp.provider,
+                    "model": resp.model,
+                    "content_prefix": (resp.content or "")[:200],
+                },
+            )
         return None, f"{section}: refused"
 
     parsed = parse_llm_json(resp.content or "")
     if parsed is None:
+        logger.error(
+            "jd_door4_section_parse_error url=%s section=%s provider=%s content_prefix=%r",
+            url,
+            section,
+            resp.provider,
+            (resp.content or "")[:200],
+        )
+        if obs_repo is not None:
+            await obs_repo.insert_error(
+                component="jd_extractor",
+                error_type="door4_parse_error",
+                severity="HIGH",
+                message=f"door-4 section {section!r} returned unparseable JSON",
+                context={
+                    "url": url,
+                    "section": section,
+                    "provider": resp.provider,
+                    "model": resp.model,
+                    "content_prefix": (resp.content or "")[:200],
+                    "tokens_in": resp.prompt_tokens,
+                    "tokens_out": resp.completion_tokens,
+                },
+                next_action="the provider replied non-JSON; content prefix above for diagnosis",
+            )
         return None, f"{section}: parse_error"
 
     parsed_stripped = {k: v for k, v in parsed.items() if k != "_meta"}
     try:
         obj = model(**parsed_stripped)
-    except Exception:
+    except Exception as exc:
+        logger.error(
+            "jd_door4_section_schema_error url=%s section=%s provider=%s parsed_keys=%s err=%r",
+            url,
+            section,
+            resp.provider,
+            sorted(parsed_stripped.keys()),
+            exc,
+        )
+        if obs_repo is not None:
+            await obs_repo.insert_error(
+                component="jd_extractor",
+                error_type="door4_schema_error",
+                severity="HIGH",
+                message=f"door-4 section {section!r} failed schema validation: {exc}",
+                context={
+                    "url": url,
+                    "section": section,
+                    "provider": resp.provider,
+                    "model": resp.model,
+                    "parsed_keys": sorted(parsed_stripped.keys()),
+                },
+            )
         return None, f"{section}: schema_error"
 
     section_dict = obj.model_dump(mode="json")
+    if section == "good_to_have" and isinstance(obj, GoodToHaveSection):
+        # D46/D48: the strict-mode wire shape for ``other`` is a list of
+        # ``{name, values}`` pairs; the payload contract is a dict — rebuild it
+        # here so downstream merges/reads keep the documented shape.
+        section_dict["other"] = obj.to_payload_dict()
     merge_over(accumulator, section_dict)
+    logger.info(
+        "jd_door4_section_ok url=%s section=%s provider=%s model=%s tokens_in=%s tokens_out=%s latency_ms=%s keys=%s",
+        url,
+        section,
+        resp.provider,
+        resp.model,
+        resp.prompt_tokens,
+        resp.completion_tokens,
+        resp.latency_ms,
+        sorted(section_dict.keys()),
+    )
     return section_dict, None
 
 
@@ -641,10 +776,12 @@ async def extract_job(
         budget = _BudgetTracker()
         gaps_recorded: list[str] = []
         injection_flagged = check_for_prompt_injection(cleaned_text)
+        door4_section_trace: list[dict[str, Any]] = []
 
         if not injection_flagged and cleaned_text:
             for section in _DOOR4_SECTIONS:
-                _, gap = await _run_door4_section(
+                section_start = budget.call_count
+                section_dict, gap = await _run_door4_section(
                     section,
                     text=cleaned_text,
                     accumulator=accumulator,
@@ -653,11 +790,32 @@ async def extract_job(
                     user_id=user_id,
                     adapter_factory=adapter_factory,
                     iso_now=iso_now,
+                    obs_repo=obs_repo,
+                    url=route.url,
                 )
                 if gap is not None:
                     gaps_recorded.append(gap)
+                door4_section_trace.append(
+                    {
+                        "section": section,
+                        "ok": gap is None,
+                        "gap": gap,
+                        "keys_merged": sorted(section_dict.keys()) if section_dict is not None else [],
+                        "calls_used_delta": budget.call_count - section_start,
+                    }
+                )
         else:
             gaps_recorded.append("prompt_injection_flagged" if injection_flagged else "empty_text")
+            for section in _DOOR4_SECTIONS:
+                door4_section_trace.append(
+                    {
+                        "section": section,
+                        "ok": False,
+                        "gap": gaps_recorded[-1],
+                        "keys_merged": [],
+                        "calls_used_delta": 0,
+                    }
+                )
 
         # Door 5 — targeted 0-1 gap-fill (skips, never raises, when budget gone — D45)
         remaining_gaps = gaps_for(accumulator)
@@ -698,6 +856,15 @@ async def extract_job(
         final_url_hash = final_url
 
         payload = dict(accumulator)
+        # D46/D47: always ship stable optional keys — merge_over drops empty lists,
+        # but good_to_have and other are part of the payload contract, so an LLM
+        # that left them empty must still yield the key (as an empty array/object).
+        payload.setdefault("good_to_have", [])
+        payload.setdefault("other", {})
+        if payload.get("other"):
+            # D46: cap residual categories at build time so the persisted payload and
+            # the validated model agree (validator trims, but persistence reads raw dict).
+            payload["other"] = dict(list(payload["other"].items())[:_OTHER_MAX_KEYS])
         payload["_meta"] = {
             "schema_version": CURRENT_SCHEMA_VERSION,
             "extracted_via_door": extracted_via_door,
@@ -755,7 +922,20 @@ async def extract_job(
                 "snapshot_id": str(snapshot_id),
                 "extracted_via_door": extracted_via_door,
                 "cache_hit": False,
+                "door4_sections": door4_section_trace,
+                "door4_gaps": gaps_recorded,
+                "extraction_tokens": budget.used_tokens,
             },
+        )
+
+        logger.info(
+            "jd_extract_done url=%s door=%s sections=%r gaps=%r tokens=%d jobs=%s",
+            route.url,
+            extracted_via_door,
+            [t["section"] for t in door4_section_trace],
+            gaps_recorded,
+            budget.used_tokens,
+            job["id"],
         )
 
         return JobExtraction(

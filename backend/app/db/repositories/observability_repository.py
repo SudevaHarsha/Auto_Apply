@@ -40,3 +40,34 @@ class ObservabilityRepository(BaseRepository):
                 "ip_address": ip_address,
             },
         )
+
+    async def insert_error(
+        self,
+        *,
+        component: str,
+        error_type: str,
+        severity: str,
+        message: str,
+        context: dict[str, Any] | None = None,
+        provider: str | None = None,
+        job_id: str | None = None,
+        next_action: str | None = None,
+    ) -> Any:
+        """Structured row in ``error_logs`` (owned here); scoped to the active user."""
+        if self.db.user_id is None:
+            raise ValueError("error log write requires an authenticated DbContext")
+        return await self.insert(
+            "error_logs",
+            {
+                "user_id": self.db.user_id,
+                "component": component,
+                "error_type": error_type,
+                "severity": severity,
+                "message": message,
+                "context": context or {},
+                "provider": provider,
+                "job_id": job_id,
+                "retry_count": 0,
+                "next_action": next_action,
+            },
+        )

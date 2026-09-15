@@ -96,7 +96,9 @@ fetch → compute content_hash
 
 ## Structured JD Schema
 
-Extended schema with per-field provenance. Each field carries `confidence` + `extracted_via_door`. `_meta.schema_version` is **required** (current value `1`); a missing or future version fails validation loudly so forward-incompatible payloads are never persisted.
+Extended schema with per-field provenance. Each field carries `confidence` + `extracted_via_door`. `_meta.schema_version` is **required** (current value `1`); a missing or future version fails validation loudly so forward-incompatible payloads are never persisted. D45 adds `other`, a bounded catch-all (`dict[str, str | list[str]]`, max 8 categories) for important posting content the typed fields don't cover (e.g. "About the Role", "Why Join"); it is extracted in the same Door-4 `good_to_have` call and stowed in a JSONB column, included only as a store, never scored.
+
+> **D48 wire shape:** OpenAI-compatible strict `response_format.json_schema` cannot express a free-form `dict[str, ...]` (it requires fully-constrained objects), so the schema sent to the LLM for the `good_to_have` section renders `other` as a list of `{"name": str, "values": [str]}` pairs. The section model accepts both that pair-list and the legacy dict form, then rebuilds the documented `dict` payload via `GoodToHaveSection.to_payload_dict()` before merge.
 
 ```jsonc
 {
@@ -116,6 +118,11 @@ Extended schema with per-field provenance. Each field carries `confidence` + `ex
   "work_auth_visa": {"sponsorship": true},
   "responsibilities": ["Design APIs", "Lead team of 5"],
   "screening_question_hints": ["Why interested in Stripe?"],
+  "other": {
+    "About the Role": "Build the core payments platform",
+    "What You'd Build": ["Live demos for merchants", "Reusable building blocks"],
+    "Why Join Stripe": ["Remote-friendly culture", "Learning budget"]
+  },
   "posted_at": "2026-08-15",
   "_meta": {"schema_version": 1, "extracted_via_door": 2, "confidence": {"title": 0.95, "skills": 0.8}}
 }
