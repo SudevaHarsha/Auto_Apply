@@ -197,12 +197,34 @@ async def _exhaust(
     step: str | None,
     providers_consumed: list[str],
     error_message: str,
+    attempts: list[dict[str, Any]] | None = None,
 ) -> None:
+    attempts = attempts or [
+        {"provider": p, "status": "failed", "error_type": "unknown", "called": True} for p in providers_consumed
+    ]
     await ObservabilityRepository(db).insert_audit(
         action="all_providers_exhausted",
         resource_type="system",
         resource_id=None,
-        details={"providers": providers_consumed, "error_message": error_message},
+        details={
+            "providers": providers_consumed,
+            "error_message": error_message,
+            "attempts": attempts,
+            "step": step,
+        },
+    )
+    await ObservabilityRepository(db).insert_error(
+        component="llm_router",
+        error_type="all_providers_exhausted",
+        severity="HIGH",
+        message=error_message,
+        context={
+            "providers_consumed": providers_consumed,
+            "attempts": attempts,
+            "step": step,
+        },
+        job_id=str(job_id) if job_id is not None else None,
+        next_action="check provider health / quota and retry",
     )
     if job_id is not None and step in VALID_PIPELINE_STEPS:
         await CheckpointingRepository(db).insert(
@@ -215,6 +237,7 @@ async def _exhaust(
                     "llm_all_providers_exhausted": True,
                     "failed_providers": providers_consumed,
                     "error_message": error_message,
+                    "attempts": attempts,
                 },
             },
         )
@@ -240,11 +263,30 @@ async def route_llm_request(
         repo = LlmRouterRepository(db)
         chain = await _resolve_chain(db, user_id, list(provider_chain) if provider_chain else None, repo)
         consumed: list[str] = []
+        attempts: list[dict[str, Any]] = []
         for name, row in chain:
             if not is_registered(name):
+                attempts.append(
+                    {
+                        "provider": name,
+                        "status": "unregistered",
+                        "error_type": "unregistered",
+                        "called": False,
+                        "skipped_by_breaker": False,
+                    }
+                )
                 continue
             proceed, trial = await _handle_breakers(db, repo, user_id, name, now)
             if not proceed:
+                attempts.append(
+                    {
+                        "provider": name,
+                        "status": "breaker_skip",
+                        "error_type": "breaker_skip",
+                        "called": False,
+                        "skipped_by_breaker": True,
+                    }
+                )
                 continue
             api_key: str | None = None
             if row.get("api_key_encrypted"):
@@ -252,6 +294,16 @@ async def route_llm_request(
                     api_key = await _try_decrypt_key(row)
                 except DecryptionError:
                     await _record_failure(db, repo, user_id, row, job_id, error_type="invalid_key")
+                    attempts.append(
+                        {
+                            "provider": name,
+                            "status": "failed",
+                            "error_type": "invalid_key",
+                            "called": True,
+                            "skipped_by_breaker": False,
+                            "latency_ms": 0,
+                        }
+                    )
                     continue
             adapter = builder(name)
             response = await asyncio.to_thread(
@@ -291,6 +343,18 @@ async def route_llm_request(
                 await _record_failure(
                     db, repo, user_id, row, job_id, error_type="unavailable", latency_ms=response.latency_ms
                 )
+                attempts.append(
+                    {
+                        "provider": name,
+                        "status": "failed",
+                        "error_type": "unavailable",
+                        "called": True,
+                        "skipped_by_breaker": False,
+                        "status_code": response.status_code,
+                        "retry_after": response.retry_after,
+                        "latency_ms": response.latency_ms,
+                    }
+                )
                 continue
             if error_type == "rate_limited" or response.status_code == 429:
                 await repo.ensure_breaker(user_id, name)
@@ -313,11 +377,30 @@ async def route_llm_request(
                     now=now,
                 )
             await _record_failure(db, repo, user_id, row, job_id, error_type=error_type, latency_ms=response.latency_ms)
+            attempts.append(
+                {
+                    "provider": name,
+                    "status": "failed",
+                    "error_type": error_type,
+                    "called": True,
+                    "skipped_by_breaker": False,
+                    "status_code": response.status_code,
+                    "retry_after": response.retry_after,
+                    "latency_ms": response.latency_ms,
+                }
+            )
         error_message = f"all LLM providers exhausted: {', '.join(consumed) or 'none resolved'}"
         await _exhaust(
-            db, repo, user_id, job_id=job_id, step=step, providers_consumed=consumed, error_message=error_message
+            db,
+            repo,
+            user_id,
+            job_id=job_id,
+            step=step,
+            providers_consumed=consumed,
+            attempts=attempts,
+            error_message=error_message,
         )
-    raise ProvidersExhaustedError(error_message)
+    raise ProvidersExhaustedError(error_message, details={"attempts": attempts, "providers_consumed": consumed})
 
 
 async def generate_structured(
@@ -348,17 +431,46 @@ async def generate_structured(
         repo = LlmRouterRepository(db)
         chain = await _resolve_chain(db, user_id, list(provider_chain) if provider_chain else None, repo)
         consumed: list[str] = []
+        attempts: list[dict[str, Any]] = []
         for name, row in chain:
             if not is_registered(name):
+                attempts.append(
+                    {
+                        "provider": name,
+                        "status": "unregistered",
+                        "error_type": "unregistered",
+                        "called": False,
+                        "skipped_by_breaker": False,
+                    }
+                )
                 continue
             proceed, trial = await _handle_breakers(db, repo, user_id, name, now)
             if not proceed:
+                attempts.append(
+                    {
+                        "provider": name,
+                        "status": "breaker_skip",
+                        "error_type": "breaker_skip",
+                        "called": False,
+                        "skipped_by_breaker": True,
+                    }
+                )
                 continue
             if row.get("api_key_encrypted"):
                 try:
                     api_key = await _try_decrypt_key(row)
                 except DecryptionError:
                     await _record_failure(db, repo, user_id, row, job_id, error_type="invalid_key")
+                    attempts.append(
+                        {
+                            "provider": name,
+                            "status": "failed",
+                            "error_type": "invalid_key",
+                            "called": True,
+                            "skipped_by_breaker": False,
+                            "latency_ms": 0,
+                        }
+                    )
                     continue
             else:
                 api_key = None
@@ -366,6 +478,7 @@ async def generate_structured(
             consumed.append(name)
             repairs_used = 0
             call_prompt = prompt
+            attempt_error: tuple[str, dict[str, Any]] | None = None
             while True:
                 response = await asyncio.to_thread(
                     adapter.chat,
@@ -410,6 +523,21 @@ async def generate_structured(
                         error_type=error_type,
                         latency_ms=response.latency_ms,
                     )
+                    attempt_error = (
+                        error_type,
+                        {
+                            "provider": name,
+                            "status": "failed",
+                            "error_type": error_type,
+                            "called": True,
+                            "skipped_by_breaker": False,
+                            "status_code": response.status_code,
+                            "retry_after": response.retry_after,
+                            "latency_ms": response.latency_ms,
+                            "repairs_used": repairs_used,
+                            "max_repairs": max_repairs,
+                        },
+                    )
                     if repairs_used >= max_repairs:
                         break
                     repairs_used += 1
@@ -428,6 +556,19 @@ async def generate_structured(
                         job_id,
                         error_type="unavailable",
                         latency_ms=response.latency_ms,
+                    )
+                    attempt_error = (
+                        "unavailable",
+                        {
+                            "provider": name,
+                            "status": "failed",
+                            "error_type": "unavailable",
+                            "called": True,
+                            "skipped_by_breaker": False,
+                            "status_code": response.status_code,
+                            "retry_after": response.retry_after,
+                            "latency_ms": response.latency_ms,
+                        },
                     )
                     break
                 error_type = response.error_type or ("timeout" if response.status == "timeout" else "server_error")
@@ -454,9 +595,31 @@ async def generate_structured(
                 await _record_failure(
                     db, repo, user_id, row, job_id, error_type=error_type, latency_ms=response.latency_ms
                 )
+                attempt_error = (
+                    error_type,
+                    {
+                        "provider": name,
+                        "status": "failed",
+                        "error_type": error_type,
+                        "called": True,
+                        "skipped_by_breaker": False,
+                        "status_code": response.status_code,
+                        "retry_after": response.retry_after,
+                        "latency_ms": response.latency_ms,
+                    },
+                )
                 break
+            if attempt_error is not None:
+                attempts.append(attempt_error[1])
         error_message = f"all LLM providers exhausted: {', '.join(consumed) or 'none resolved'}"
         await _exhaust(
-            db, repo, user_id, job_id=job_id, step=step, providers_consumed=consumed, error_message=error_message
+            db,
+            repo,
+            user_id,
+            job_id=job_id,
+            step=step,
+            providers_consumed=consumed,
+            attempts=attempts,
+            error_message=error_message,
         )
-    raise ProvidersExhaustedError(error_message)
+    raise ProvidersExhaustedError(error_message, details={"attempts": attempts, "providers_consumed": consumed})

@@ -1,0 +1,29 @@
+{
+  "id": "lever-posting-raincoat",
+  "text": "Senior Data Infrastructure Engineer",
+  "createdAt": "2026-08-30T09:12:00Z",
+  "updatedAt": "2026-09-02T15:40:00Z",
+  "contactCompanyName": "Raincoat",
+  "categories": {
+    "commitment": "Full-time",
+    "location": "Remote / Seattle",
+    "team": "Platform",
+    "locationNotes": "",
+    "allLocations": ["Remote", "Seattle", "Portland"],
+    "teamLocation": "Seattle"
+  },
+  "lists": [
+    {
+      "text": "Pension plan\nStock options"
+    }
+  ],
+  "salaryRange": {
+    "min": 180000,
+    "max": 220000,
+    "currency": "USD",
+    "interval": "year"
+  },
+  "descriptionHtml": "<p>Raincoat is hiring a Senior Data Infrastructure Engineer to lead our lakehouse\n  platform. We are looking for someone who has owned distributed data systems in production\n  and who can mentor a small platform team.</p><ul><li>Design the data platform roadmap for\n  the next two years.</li><li>Operate the real-time ingestion pipeline feeding our analytics\n  warehouse.</li><li>Set SLIs and run blameless incident reviews.</li></ul>",
+  "additional": "We value written-first communication and async work across time zones.",
+  "status": "published"
+}

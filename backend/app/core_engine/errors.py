@@ -47,3 +47,56 @@ class ExtractionFailedError(CoreEngineError):
 class ProfileNotFoundError(CoreEngineError):
     code = "NOT_FOUND"
     status = 404
+
+
+class FetchFailedError(CoreEngineError):
+    """A Door 1/2/3 fetch was blocked (SSRF/robots) or failed (timeout/transport)."""
+
+    code = "FETCH_FAILED"
+    status = 502
+
+
+class JobNotFoundError(CoreEngineError):
+    code = "NOT_FOUND"
+    status = 404
+
+
+class StructuredJDValidationError(CoreEngineError):
+    """Door/LLM output failed validation against the structured-JD schema.
+
+    A malformed fixture/API response surfaces as a parse error here, never as
+    raw JSON leaking into a snapshot or an API response (S6 §5).
+    """
+
+    code = "VALIDATION_ERROR"
+    status = 422
+
+
+class FreshnessBlockedError(CoreEngineError):
+    """A posting is no longer fresh enough for the operation that asked for it."""
+
+    code = "JOB_STALE"
+    status = 409
+
+
+class NotAPostingError(CoreEngineError):
+    """The URL is not a job posting (D43) — careers-hub/list pages rejected.
+
+    Distinct from a fetch/extraction failure so the API can render the right
+    user message ("couldn't identify a job posting") instead of a generic error.
+    """
+
+    code = "NOT_A_POSTING"
+    status = 422
+
+
+class ExtractionBudgetExceededError(CoreEngineError):
+    """The per-extraction LLM budget tripped (D27 call cap or D45 token cap).
+
+    A coding/expectation error, not a retryable condition: either the cascade
+    tried more than the hard 4 + 0–1 section-call ceiling, or the token
+    accumulator crossed ``JD_EXTRACTION_TOKEN_BUDGET``.
+    """
+
+    code = "EXTRACTION_BUDGET_EXCEEDED"
+    status = 429

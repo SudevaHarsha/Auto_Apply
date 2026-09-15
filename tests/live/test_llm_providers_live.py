@@ -213,11 +213,20 @@ async def test_phase1_provider_rows_persisted_encrypted_at_rest(live_ctx: dict) 
 
 
 async def test_phase2_live_route_reads_key_from_db_and_calls(live_ctx: dict) -> None:
-    """Phase 2 - real wire call whose API key is read and decrypted FROM the stored row."""
+    """Phase 2 - real wire call whose API key is read and decrypted FROM the stored row.
+
+    The router may answer from ANY healthy provider in the priority chain: a 429 on
+    the top provider is environmental and correctly falls through to the next one
+    (the live ``test_live_failover_invalid_key_to_valid`` pins exact failover). So
+    this test asserts the *call* happened with a DB-stored key (usage row + read
+    breaker), not that a specific provider answered.
+    """
     conn, user_id, cfgs = live_ctx["conn"], live_ctx["user_id"], live_ctx["cfgs"]
-    top_name = cfgs[0][0]
+    chain_names = {name for name, _ in cfgs}
     result = await _safe_route(conn, user_id, ROUTE_PROMPT)
-    assert result.provider == top_name, f"expected top-priority provider {top_name} to answer, got {result.provider}"
+    assert result.provider in chain_names, (
+        f"provider {result.provider} is not in the configured chain {sorted(chain_names)}"
+    )
     assert result.content.strip(), "live provider returned an empty response"
     assert result.prompt_tokens > 0 and result.completion_tokens > 0, "usage tokens not parsed from live response"
     assert result.latency_ms > 0

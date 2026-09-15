@@ -42,13 +42,13 @@ Any page: look for `<script type="application/ld+json">` containing schema.org `
 
 Fallback: cut menus, ads, footers out of the HTML. Keep only the main posting text using readability-style reduction. Input to LLM becomes ~10× smaller than raw HTML.
 
-### Door 4 — LLM Form-Filling (~1 call)
+### Door 4 — LLM Form-Filling (4 section-wise calls)
 
-Send the CLEAN short text (never raw HTML) to the LLM via the provider chain. LLM fills the structured JD form (§Structured JD Schema below). One cheap call on free-tier providers.
+Send the CLEAN short text (never raw HTML) to the LLM via the provider chain. D40/D41: Door 4 is **mandatory and always runs all four sections** — `header_core` → `responsibilities` → `skills` → `good_to_have` — even when earlier doors already filled data (the LLM result wins on conflict). Each section is its own routed call; a section failure records a gap instead of aborting the cascade. Total LLM calls per extraction are capped at 5 (4 door-4 sections + at most 1 door-5 gap-fill) by `_MAX_CALLS`.
 
 ### Door 5 — Gap-fill (0–1 calls)
 
-Validate the filled form. Only if critical fields are missing (e.g., skills completely empty), one targeted follow-up question to the LLM.
+Validate the filled form. Only if critical fields are missing (e.g., skills completely empty), one targeted follow-up question to the LLM. If the extraction's token budget is exhausted (D45), Door 5 is **skipped** and a `door5_budget_skip` record is kept — it never spends past the configured budget.
 
 ---
 
@@ -96,7 +96,9 @@ fetch → compute content_hash
 
 ## Structured JD Schema
 
-Extended schema with per-field provenance. Each field carries `confidence` + `extracted_via_door`.
+Extended schema with per-field provenance. Each field carries `confidence` + `extracted_via_door`. `_meta.schema_version` is **required** (current value `1`); a missing or future version fails validation loudly so forward-incompatible payloads are never persisted. D45 adds `other`, a bounded catch-all (`dict[str, str | list[str]]`, max 8 categories) for important posting content the typed fields don't cover (e.g. "About the Role", "Why Join"); it is extracted in the same Door-4 `good_to_have` call and stowed in a JSONB column, included only as a store, never scored.
+
+> **D48 wire shape:** OpenAI-compatible strict `response_format.json_schema` cannot express a free-form `dict[str, ...]` (it requires fully-constrained objects), so the schema sent to the LLM for the `good_to_have` section renders `other` as a list of `{"name": str, "values": [str]}` pairs. The section model accepts both that pair-list and the legacy dict form, then rebuilds the documented `dict` payload via `GoodToHaveSection.to_payload_dict()` before merge.
 
 ```jsonc
 {
@@ -116,8 +118,13 @@ Extended schema with per-field provenance. Each field carries `confidence` + `ex
   "work_auth_visa": {"sponsorship": true},
   "responsibilities": ["Design APIs", "Lead team of 5"],
   "screening_question_hints": ["Why interested in Stripe?"],
+  "other": {
+    "About the Role": "Build the core payments platform",
+    "What You'd Build": ["Live demos for merchants", "Reusable building blocks"],
+    "Why Join Stripe": ["Remote-friendly culture", "Learning budget"]
+  },
   "posted_at": "2026-08-15",
-  "_meta": {"extracted_via_door": 2, "confidence": {"title": 0.95, "skills": 0.8}}
+  "_meta": {"schema_version": 1, "extracted_via_door": 2, "confidence": {"title": 0.95, "skills": 0.8}}
 }
 ```
 

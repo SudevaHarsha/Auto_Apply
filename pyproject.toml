@@ -15,6 +15,8 @@ dependencies = [
     "PyMuPDF>=1.26.3",
     "pymupdf4llm>=0.0.27",
     "Jinja2",
+    "selectolax",
+    "tiktoken",
 ]
 
 [project.optional-dependencies]
@@ -24,6 +26,9 @@ dev = [
     "pytest",
     "pytest-asyncio",
     "pre-commit",
+]
+jd-render = [
+    "playwright",
 ]
 
 [build-system]
@@ -62,4 +67,5 @@ asyncio_mode = "auto"
 testpaths = ["tests"]
 markers = [
     "live: opt-in live provider smoke tests needing real API keys (.env.live, -Target test-integration-live)",
+    "network_smoke: CI-gated smoke test that hits one real live ATS URL; tolerant by design (D29)",
 ]

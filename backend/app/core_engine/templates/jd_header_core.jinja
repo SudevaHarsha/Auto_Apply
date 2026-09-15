@@ -1,0 +1,32 @@
+Extract the header / core facts of the job posting.
+
+--- The input job-posting text starts here ---
+
+{{ text_content }}
+
+--- The input job-posting text ends here ---
+
+Return ONLY a JSON object with this structure:
+{
+  "title": "Job title exactly as posted",
+  "company": "Company name",
+  "location": "City, State/Country as posted",
+  "remote_policy": "Remote" | "Hybrid" | "On-site" | null,
+  "employment_type": "Full-time" | "Part-time" | "Contract" | "Internship" | null,
+  "seniority": "Junior" | "Mid-level" | "Senior" | "Staff" | "Principal" | "Lead" | "Manager" | null,
+  "experience_range": {"min": 1, "max": 5, "period": "years"} | null,
+  "salary": {"min": 120000, "max": 150000, "currency": "USD", "period": "year"} | null,
+  "education": {"level": "Bachelor's" | "Master's" | "PhD" | null, "field": "Computer Science" | null} | null,
+  "work_auth_visa": {"sponsorship": true | false} | null
+}
+
+Rules:
+- **title / company**: copy EXACTLY as posted. Do not rephrase the title and do not append the company to the title.
+- **employment_type**: use "Full-time" unless the text explicitly says part-time, contract, or internship.
+- **seniority**: derive ONLY from explicit signals in the text (e.g. "Senior Software Engineer", "Staff Engineer", "we are hiring a lead"). If the posting does not state a level, return null.
+- **remote_policy**: set ONLY when the posting explicitly says remote, hybrid, or on-site; otherwise null.
+- **salary**: ONLY if a number with a currency is posted; use ISO 4217 codes (USD, EUR, GBP, CAD, ...). A range fills min/max; a single figure fills both. No currency is stated - return null.
+- **experience_range**: derive ONLY from an explicit span (e.g. "5+ years", "2-4 years"). Never estimate from responsibilities.
+- **education**: only if the posting requires a specific level/field (e.g. "Bachelor's in Computer Science").
+- **work_auth_visa**: sponsorship true ONLY when the text mentions visa sponsorship; otherwise null.
+- Never invent benefits, requirements, salaries, locations, or levels beyond the post.

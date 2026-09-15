@@ -1168,3 +1168,18 @@ CREATE UNIQUE INDEX idx_profiles_user_sha256
   while letting historical `NULL` rows remain in place.
 - `idx_` index count moves **39 → 40** (`EXPECTED_IDX = 40` in `db/run_migrations.py`).
 - Migration count moves **27 → 28** (`001..028`).
+
+```sql
+-- File: migrations/029_add_job_snapshots_raw_text.sql
+
+-- Persists the CLEANED JD text the cascade produced (D28, S6) — never raw HTML.
+-- Column-only: no table, no index → runner invariants (21 tables / 40 idx / 20 RLS / 22 policies) unchanged.
+ALTER TABLE job_snapshots ADD COLUMN raw_text TEXT;
+```
+
+### Effect
+
+- `job_snapshots.raw_text` stores the stripped/trimmed job-description text (never the raw fetch or
+  raw HTML) so downstream consumers get the exact cascade-produced source of truth for the LLM pass.
+- Column-only migration: table/index/RLS/policy counts all unchanged.
+- Migration count moves **28 → 29** (`001..029`).

@@ -1,0 +1,20 @@
+Extract the day-to-day responsibilities of the role.
+
+--- The input job-posting text starts here ---
+
+{{ text_content }}
+
+--- The input job-posting text ends here ---
+
+Return ONLY a JSON object with this structure:
+{
+  "responsibilities": ["responsibility 1 as stated", "responsibility 2"]
+}
+
+Rules:
+- Capture each distinct responsibility IN ORDER as presented in the post.
+- Keep the wording close to the source and preserve tech/product context ("own the platform", "mentor juniors", "operate the lakehouse").
+- De-duplicate overlapping statements; keep the most specific wording.
+- Do NOT include requirements/qualifications, benefits, or company boilerplate in this list.
+- If the responsibilities section is a bulleted list, flatten it into this array.
+- Return an empty array ONLY if the text truly has no responsibilities.
