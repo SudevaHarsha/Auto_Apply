@@ -235,7 +235,7 @@ CREATE TRIGGER update_checkpoints_updated_at
 
 CREATE TABLE evidence (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    application_id UUID REFERENCES applications(id) ON DELETE CASCADE,  -- NULL for profile_diff, jd_raw, message_raw
+    application_id UUID REFERENCES applications(id) ON DELETE CASCADE,  -- NULL for profile_diff, jd_raw, message_raw, rubric_evidence
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     type TEXT NOT NULL CHECK (type IN ('screenshot', 'pdf', 'dom_snapshot', 'profile_diff', 'jd_raw', 'message_raw')),
     file_url TEXT NOT NULL,
@@ -1183,3 +1183,65 @@ ALTER TABLE job_snapshots ADD COLUMN raw_text TEXT;
   raw HTML) so downstream consumers get the exact cascade-produced source of truth for the LLM pass.
 - Column-only migration: table/index/RLS/policy counts all unchanged.
 - Migration count moves **28 → 29** (`001..029`).
+
+---
+
+## Migration 030: Evidence Type Extension (S7 D52)
+
+Admits scoring facet evidence into the `evidence.type` CHECK: `rubric_evidence` (one row per rubric
+facet — payload carried in `metadata`, `file_url` is an internal sentinel, no file written
+pre-package). Constraint-only: no table/index/RLS/policy surface change; the `evidence` `user_id`
+policy already covers the new rows.
+
+```sql
+-- File: migrations/030_extend_evidence_type.sql
+
+-- Scoring facet evidence (S7 D52): canonical per I7 — one rubric_evidence row per rubric facet,
+-- payload in metadata.json, file_url is an internal sentinel (no file written pre-package).
+ALTER TABLE evidence DROP CONSTRAINT evidence_type_check;
+ALTER TABLE evidence ADD CONSTRAINT evidence_type_check
+    CHECK (type IN ('screenshot', 'pdf', 'dom_snapshot', 'profile_diff',
+                    'jd_raw', 'message_raw', 'rubric_evidence'));
+```
+
+### Effect
+
+- `evidence.type` grows **6 → 7** (`rubric_evidence`).
+- Constraint-only (030 alone): no count moves — the **22/41** invariants land with migration 031.
+
+---
+
+## Migration 031: Rubric Cache (S7 D58)
+
+Shared, RLS-exempt rubric persistence — the generated rubric is a property of the JD snapshot, not
+of a user. Same shared-cache pattern as `job_snapshots` (no `user_id` column, no RLS policy).
+
+```sql
+-- File: migrations/031_create_rubric_cache.sql
+
+-- Rubric persistence (S7 D58, Option B): the generated rubric is a property of the JD snapshot,
+-- NOT of a user — shared table, RLS-exempt (same pattern as job_snapshots).
+-- One row per (job, snapshot, schema_version); rubric_sha256 guards the cached content.
+CREATE TABLE rubric_cache (
+    id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    job_id          UUID NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+    snapshot_id     UUID NOT NULL,
+    schema_version  INTEGER NOT NULL CHECK (schema_version = 1),  -- CURRENT_SCHEMA_VERSION at ship; a
+                                                                  -- bump is a deliberate re-generation seam
+    rubric          JSONB NOT NULL,   -- role.json shape + rendered criteria/system (+ labels/weights)
+    rubric_sha256   TEXT NOT NULL,    -- content guard, recomputed on read (cache-integrity check)
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE UNIQUE INDEX idx_rubric_cache_key
+    ON rubric_cache (job_id, snapshot_id, schema_version);
+```
+
+### Effect
+
+- `idx_rubric_cache_key` enforces one row per `(job_id, snapshot_id, schema_version)` and is counted
+  by the runner (`idx_*`).
+- Table count moves **21 → 22** (`EXPECTED_TABLES = 22`); index count moves **40 → 41**
+  (`EXPECTED_IDX = 41`). RLS enabled/forced 20 and policies 22 unchanged (`rubric_cache` is
+  RLS-exempt, no policy).
+- Migration count moves **29 → 31** (`001..031`).

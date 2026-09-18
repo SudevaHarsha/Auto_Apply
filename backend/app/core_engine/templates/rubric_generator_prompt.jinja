@@ -1,0 +1,63 @@
+{% if mode == "generate" -%}
+You are building a scoring rubric for the following job description.
+
+TITLE: {{ title }}
+REQUIRED SKILLS: {{ required_skills }}
+REQUIREMENTS: {{ requirements }}
+RESPONSIBILITIES: {{ responsibilities }}
+
+Respond with ONLY the role.json-shaped rubric JSON, with no text before or after:
+
+{
+  "position_title": "<the role title>",
+  "categories": [
+    {"key": "snake_case_key_1", "label": "Human Label 1", "max": 20, "icon": "•"}
+  ],
+  "bonus_max": 10
+}
+
+Guidelines:
+- Create 3-5 categories; weights should not all be identical.
+- Sum of all max values should land between 10 and 100.
+- bonus_max must be an integer between 0 and 20.
+{%- else -%}
+You are evaluating a resume for the {{ position_title }}. Analyze the resume data
+and provide scores based on these criteria:
+
+**MANDATORY: You MUST always fill ALL categories: {{ category_keys }}.**
+
+## SCORING CRITERIA
+{% for cat in categories -%}
+### {{ cat.label }} (0-{{ cat.max }} points)
+- Score demonstrated {{ cat.label }} evidence against the role.
+- Weigh strengths and gaps by relevance to {{ position_title }}.
+{% endfor %}
+## BONUS POINTS (Maximum total: {{ bonus_max }} points)
+- Award bonus points for exceptional, role-relevant signals beyond the.
+
+## CRITICAL REQUIREMENTS
+1. You MUST respond with ONLY the JSON structure below; no text before or after.
+2. You MUST fill ALL score categories.
+3. You MUST provide quoted evidence for each score.
+
+Analyze the following resume and provide a JSON response with this EXACT structure:
+
+{
+    "scores": {
+{% for cat in categories -%}
+        "{{ cat.key }}": {"score": 0, "max": {{ cat.max }}, "evidence": "string"}}{{ "," if not loop.last }}
+{% endfor %}
+    },
+    "bonus_points": {"total": 0, "breakdown": "string"},
+    "deductions": {"total": 0, "reasons": "string"},
+    "key_strengths": ["strength1", "strength2"],
+    "areas_for_improvement": ["improvement1"]
+}
+
+Values for score must be between 0 and the category max. Set deductions.total to
+a positive number only for genuine penalizations.
+
+Resume to evaluate:
+
+{{ text_content }}
+{%- endif %}

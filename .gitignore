@@ -12,6 +12,8 @@ dist/
 .env.live
 # live-extraction test PDFs (real personal resumes — never commit)
 tests/live/pdf/
+# real payloads captured from live S5/S6 runs, consumed by S7 live score seed
+tests/live/chain/
 *.log
 .idea/
 .vscode/

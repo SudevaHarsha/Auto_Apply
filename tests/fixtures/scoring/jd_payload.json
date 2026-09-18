@@ -1,0 +1,30 @@
+{
+  "title": "Senior Backend Engineer",
+  "company": "Acme Corp",
+  "location": "Remote",
+  "remote_policy": "Remote",
+  "employment_type": "Full-time",
+  "seniority": "Senior",
+  "experience_range": { "min_years": 5, "max_years": 8 },
+  "salary": { "min": 150000.0, "currency": "USD", "period": "yearly" },
+  "skills": {
+    "required": ["Python", "PostgreSQL", "Docker", "REST APIs"],
+    "preferred": ["FastAPI", "Kubernetes", "Redis"]
+  },
+  "education": { "level": "Bachelor", "field": "Computer Science" },
+  "work_auth_visa": { "sponsorship": true },
+  "responsibilities": [
+    "Own the backend service",
+    "Design and ship REST APIs",
+    "Mentor junior engineers"
+  ],
+  "good_to_have": ["FinTech experience", "Recent startup exposure"],
+  "screening_question_hints": [],
+  "other": {},
+  "posted_at": "2026-09-01",
+  "_meta": {
+    "schema_version": 1,
+    "extracted_via_door": 4,
+    "source_url": "https://boards.greenhouse.io/acme/jobs/scoring-fixture"
+  }
+}

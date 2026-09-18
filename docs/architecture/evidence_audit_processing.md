@@ -8,17 +8,18 @@ How evidence is captured/stored and audit logs are written/queried.
 
 ### What is Evidence?
 
-Proof that an application was submitted. Six types:
+Proof that an application was submitted. Seven types:
 
 ```
-TYPE           WHAT                    CAPTURED BY        WHEN
-──────────────────────────────────────────────────────────────
-screenshot     PNG of confirmation     Extension          After submit
-pdf            Filled application PDF  Extension          After submit
-dom_snapshot   Raw form field values   Extension          After fill
-profile_diff   Resume changes before/after  core_engine   After optimization
-jd_raw         Raw job description JSON    core_engine    After extraction
-message_raw    Raw source message      discovery          On ingestion
+TYPE             WHAT                       CAPTURED BY        WHEN
+──────────────────────────────────────────────────────────────────
+screenshot       PNG of confirmation       Extension          After submit
+pdf              Filled application PDF    Extension          After submit
+dom_snapshot     Raw form field values     Extension          After fill
+profile_diff     Resume changes before/after  core_engine     After optimization
+jd_raw           Raw job description JSON     core_engine     After extraction
+message_raw      Raw source message        discovery          On ingestion
+rubric_evidence  Per-facet score evidence  core_engine        After scoring
 ```
 
 ### Capture Flow

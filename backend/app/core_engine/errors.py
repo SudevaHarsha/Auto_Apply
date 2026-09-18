@@ -100,3 +100,61 @@ class ExtractionBudgetExceededError(CoreEngineError):
 
     code = "EXTRACTION_BUDGET_EXCEEDED"
     status = 429
+
+
+class ScoringFailedError(CoreEngineError):
+    """The evaluation stage of a score failed (D54 single-shot, no retry).
+
+    The rubric may be cached/persisted, but no summary or facet score exists.
+    A malformed/refused evaluation response surfaces here (never raw JSON
+    leaking into the DB), mirroring D42's no-recall rule.
+    """
+
+    code = "SCORING_FAILED"
+    status = 500
+
+
+class RubricGenerationFailedError(CoreEngineError):
+    """Rubric generation failed (all providers exhausted or non-JSON output).
+
+    The JD snapshot is untouched and ``rubric_cache`` gets no row: the failure
+    is audit-only (errors table), never a partial cache write.
+    """
+
+    code = "RUBRIC_GENERATION_FAILED"
+    status = 500
+
+
+class ScoringBudgetExceededError(CoreEngineError):
+    """Scoring's hard LLM-call counter tripped (D54).
+
+    Fresh score = 2 routed calls (1 rubric + 1 evaluation); cache-hit re-score
+    = 1. Exceeding it is a coding error, same family as S6's
+    ``ExtractionBudgetExceededError``.
+    """
+
+    code = "SCORING_BUDGET_EXCEEDED"
+    status = 429
+
+
+class NoCurrentProfileError(CoreEngineError):
+    """No profile exists for the user (canonical PROFILE_NO_ACTIVE).
+
+    Raised by ``score_job`` when no profile is handed in and the user has no
+    rows in ``profiles``; fail-loud before any LLM spend (0 routed calls).
+    """
+
+    code = "PROFILE_NO_ACTIVE"
+    status = 404
+
+
+class SnapshotSchemaMismatchError(CoreEngineError):
+    """The snapshot payload's schema version is not the current one (D55).
+
+    A fail-loud, ValueError-family guard: ``score_job`` refuses any payload
+    whose ``_meta.schema_version != CURRENT_SCHEMA_VERSION`` *before* any LLM
+    call — never silently default-filled into a mis-scored shape.
+    """
+
+    code = "SNAPSHOT_SCHEMA_MISMATCH"
+    status = 422
