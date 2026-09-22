@@ -49,7 +49,7 @@ pytestmark = pytest.mark.live
 APP_URL = os.getenv("DATABASE_URL", "postgresql://app_user:changeme_in_production@localhost:5435/autoapply")
 PASSWORD = "Str0ng!password"
 
-CLOUD_PROVIDERS = ("gemini", "groq", "openrouter")
+CLOUD_PROVIDERS = ("groq", "gemini", "openrouter")
 KEY_ENV = {
     "gemini": "LIVE_GEMINI_API_KEY",
     "groq": "LIVE_GROQ_API_KEY",

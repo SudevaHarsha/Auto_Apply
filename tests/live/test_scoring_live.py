@@ -55,7 +55,7 @@ CHAIN = ROOT / "tests" / "live" / "chain"
 # tolerate modest score movement but a big swing on an identical input is a bug.
 APT_SCORE_DIFF = 10
 
-CLOUD_PROVIDERS = ("gemini", "groq", "openrouter")
+CLOUD_PROVIDERS = ("groq", "gemini", "openrouter")
 KEY_ENV = {
     "gemini": "LIVE_GEMINI_API_KEY",
     "groq": "LIVE_GROQ_API_KEY",
@@ -219,7 +219,7 @@ async def _score_one(conn: psycopg.AsyncConnection, user_id: uuid.UUID, job_id: 
 
 
 async def test_live_fresh_score_real_generation_and_evaluation(live_ctx: dict) -> None:
-    """One fresh score → 2 routed calls, job scored, rubric persisted, evidence + audit."""
+    """One fresh score → 2-3 routed calls (incl. one possible gate repair), rubric persisted, evidence + audit."""
     conn, user_id = live_ctx["conn"], live_ctx["user_id"]
     seed = await _seed(conn, user_id, jd_index=1)
     usage_before = await _count(
@@ -263,7 +263,7 @@ async def test_live_fresh_score_real_generation_and_evaluation(live_ctx: dict) -
         str(user_id),
         str(seed["job_id"]),
     )
-    assert usage_after - usage_before == 2, "fresh score = exactly 2 routed calls (D54)"
+    assert usage_after - usage_before in (2, 3), "fresh score = rubric (≤2 incl. gate repair) + 1 eval (D71)"
 
 
 async def test_live_second_score_hits_rubric_cache(live_ctx: dict) -> None:

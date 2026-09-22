@@ -37,7 +37,7 @@ PASSWORD = "Str0ng!password"
 ROOT = Path(__file__).resolve().parents[2]
 LIVE_PDF_DIR = Path(os.getenv("LIVE_EXTRACTION_PDF_DIR", str(ROOT / "tests" / "live" / "pdf")))
 
-CLOUD_PROVIDERS = ("gemini", "groq", "openrouter")
+CLOUD_PROVIDERS = ("groq", "gemini", "openrouter")
 KEY_ENV = {
     "gemini": "LIVE_GEMINI_API_KEY",
     "groq": "LIVE_GROQ_API_KEY",

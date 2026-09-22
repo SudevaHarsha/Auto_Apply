@@ -1663,7 +1663,7 @@ def test_no_s5_diffs() -> None:
     allowlist += sorted(
         str(p.relative_to(ROOT)).replace("\\", "/")
         for p in (ROOT / "backend" / "app" / "core_engine" / "templates").glob("*.jinja")
-        if not p.name.startswith("jd_")
+        if not p.name.startswith("jd_") and not p.name.startswith("rubric_generator_")
     )
     proc = subprocess.run(
         ["git", "-C", str(ROOT), "diff", "--exit-code", "HEAD", "--", *allowlist],

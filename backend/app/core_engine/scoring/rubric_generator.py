@@ -1,10 +1,31 @@
-"""Rubric generation (D49/D58, AutoApply-owned — rubric_generator.md).
+"""Rubric generation (D49/D58 + S7-v2 §B1/B2/B6 → §10, AutoApply-owned).
 
-The JD snapshot payload → exactly one routed LLM call (``json_mode``, role.json
--shaped schema) → an in-memory ``RoleDefinition`` built from the AutoApply
-``rubric_generator_*.jinja`` templates (no role-dir filesystem I/O). Missing or
-broken templates fall back to inline Jinja constants (still Jinja, never inline
-f-strings), so the builders never return None (T7-1).
+The JD snapshot payload → one or two routed LLM calls (``json_mode``, the
+extended role.json-shaped schema) → an S7-v2 partition gate → an in-memory
+``RoleDefinition`` built from the AutoApply ``rubric_generator_*.jinja``
+templates (no role-dir filesystem I/O). Missing or broken templates fall back to
+inline Jinja constants (still Jinja, never inline f-strings), so the builders
+never return None (T7-1).
+
+S7-v2 corrective design (§10):
+- **B1**: the generation prompt carries the *entire structured JD payload*
+  (``jd_input``), not a lossy 4-field summary — the gate needs the full corpus
+  to verify grounding.
+- **Fix 1/D67**: ``RubricSchema.model_json_schema()`` is dialected by
+  ``schema_dialects``, which allow-list-strips the wire keywords Gemini rejects;
+  pydantic here re-enforces every constraint via ``model_validate``.
+- **Fix 2/D68**: provider exhaustion is re-raised **unchanged** (never wrapped
+  into ``RubricGenerationFailedError``) so the live skip-guard fires on real
+  outages, and the failure is ERROR-logged with attempts/providers.
+- **Fix 4**: ``validate_partition`` = hard *grounding* gate (anchors, literal
+  ``jd_sources``, ceiling vocabulary, removed-vs-required) + soft
+  *self-consistent coverage* gate. A targeted repair runs at most once; a
+  grounding failure after repair rejects; a coverage failure after repair
+  accepts-with-flag (``gate_miss`` persisted in the envelope + evidence metadata).
+- **D71 budget**: rubric ≤ 2 routed calls (1 generation + 1 repair when a gate
+  miss runs) + 1 evaluation — the scorer's ``_CallLimiter`` cap is 3. Set
+  ``SCORING_DISABLE_RUBRIC_REPAIR=1`` during live testing to force the single-call
+  path (no gate repair, saves calls/tokens).
 
 Persistence (``put_rubric``) is the *scorer's* job: the cache row must land in
 the same transaction as the score so a failed score rolls the cache back too
@@ -15,8 +36,12 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
+import os
+import re
 import uuid
 from collections.abc import Callable
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -26,10 +51,13 @@ from jinja2 import Environment, FileSystemLoader, Template
 from backend.app.core_engine.errors import RubricGenerationFailedError
 from backend.app.core_engine.jd_schema import StructuredJD
 from backend.app.core_engine.json_utils import extract_json_from_response
+from backend.app.llm.errors import ProvidersExhaustedError
 from backend.app.llm.router import route_llm_request
 
 from .role import Category, RoleDefinition
 from .schemas import PersistedRubric, RubricSchema
+
+logger = logging.getLogger("core_engine.scoring.rubric_generator")
 
 _TEMPLATE_DIR = str(Path(__file__).resolve().parent.parent / "templates")
 _ENV = Environment(loader=FileSystemLoader(_TEMPLATE_DIR), trim_blocks=True, lstrip_blocks=True)
@@ -38,9 +66,8 @@ _RUBRIC_PROMPT_FALLBACK = """You are building a scoring rubric. Respond with ONL
 top-level JSON object named "rubric":
 
 TITLE: {{ title }}
-REQUIRED SKILLS: {{ required_skills }}
-REQUIREMENTS: {{ requirements }}
-RESPONSIBILITIES: {{ responsibilities }}
+ENTIRE STRUCTURED JD PAYLOAD:
+{{ jd_json }}
 
 {% if mode == "evaluate" %}Evaluate the resume for the {{ position_title }}.
 
@@ -68,12 +95,15 @@ def render_template(name: str, *, fallback: str, **kwargs: Any) -> str:
         return _ENV.from_string(fallback).render(**kwargs)
 
 
-def jd_summary(payload: dict[str, Any]) -> dict[str, str]:
-    """Deterministic JD fields for the generation prompt.
+def jd_input(payload: dict[str, Any]) -> dict[str, Any]:
+    """Deterministic full-payload JD inputs for the generation prompt + gate (B1).
 
-    (rubric_generator.md input contract: title / required_skills / requirements /
-    responsibilities.)
+    Returns the full structured JD as a JSON string (``_meta`` excluded so the
+    corpus the gate verifies against is the job itself), plus the extracted
+    required-skill/responsibility lists the coverage gate needs, plus the
+    corpus token set every ``jd_sources``/band claim must trace to.
     """
+    structured: StructuredJD | None = None
     try:
         structured = StructuredJD.model_validate(payload)
     except Exception:
@@ -82,37 +112,23 @@ def jd_summary(payload: dict[str, Any]) -> dict[str, str]:
     title = (structured.title if structured and structured.title else payload.get("title")) or "the advertised role"
 
     if structured:
-        skills = structured.skills
-        required = list(skills.required)
-        preferred = [f"preferred: {item}" for item in skills.preferred]
-        required_skills = "; ".join(required + preferred) or "not stated"
-
-        requirement_parts = []
-        if structured.education:
-            if structured.education.level:
-                requirement_parts.append(f"education: {structured.education.level}")
-            if structured.education.field:
-                requirement_parts.append(f"field: {structured.education.field}")
-        if structured.work_auth_visa and structured.work_auth_visa.sponsorship is not None:
-            requirement_parts.append(f"visa sponsorship: {'yes' if structured.work_auth_visa.sponsorship else 'no'}")
-        if structured.good_to_have:
-            requirement_parts.append(f"good to have: {'; '.join(structured.good_to_have[:5])}")
-        requirements = "; ".join(requirement_parts) or "not stated"
-        responsibilities = "; ".join(structured.responsibilities) or "not stated"
+        body = structured.model_dump(exclude={"meta"})
+        required = list(structured.skills.required)
+        responsibilities = list(structured.responsibilities)
     else:
+        body = {key: value for key, value in payload.items() if key != "_meta"}
         skills_raw = (payload.get("skills") or {}) if isinstance(payload, dict) else {}
         required = list(skills_raw.get("required") or [])
-        preferred = [f"preferred: {item}" for item in (skills_raw.get("preferred") or [])]
-        required_skills = "; ".join(required + preferred) or "not stated"
-        requirements = "not stated"
         responsibilities_raw = payload.get("responsibilities") if isinstance(payload, dict) else None
-        responsibilities = "; ".join(responsibilities_raw) if isinstance(responsibilities_raw, list) else "not stated"
+        responsibilities = list(responsibilities_raw) if isinstance(responsibilities_raw, list) else []
 
+    jd_json = json.dumps(body, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
     return {
         "title": title,
-        "required_skills": required_skills,
-        "requirements": requirements,
+        "jd_json": jd_json,
+        "required_skills": required,
         "responsibilities": responsibilities,
+        "jd_tokens": frozenset(_tokens(jd_json)),
     }
 
 
@@ -123,23 +139,44 @@ def rubric_sha256(rubric: dict[str, Any]) -> str:
 
 
 def persist_envelope(role_def: RoleDefinition) -> dict[str, Any]:
-    """Envelope written to ``rubric_cache.rubric`` (PersistedRubric shape, D58)."""
+    """Envelope written to ``rubric_cache.rubric`` (PersistedRubric shape, D58 + §B3)."""
     return {
         "name": role_def.name,
         "position_title": role_def.position_title,
         "categories": [
-            {"key": cat.key, "label": cat.label, "max": cat.max, "icon": cat.icon} for cat in role_def.categories
+            {
+                "key": cat.key,
+                "label": cat.label,
+                "max": cat.max,
+                "icon": cat.icon,
+                "anchors": list(cat.anchors),
+                "jd_sources": list(cat.jd_sources),
+                "requirement_text": cat.requirement_text,
+            }
+            for cat in role_def.categories
         ],
         "bonus_max": role_def.bonus_max,
+        "bonus_signals": list(role_def.bonus_signals) if role_def.bonus_signals else [],
+        "derivation": role_def.derivation or {"scoreable": [], "eligibility": [], "removed": []},
+        "gate_miss": role_def.gate_miss,
         "criteria": role_def.criteria,
         "system_message": role_def.system_message,
     }
 
 
 def build_role_definition(rubric: RubricSchema, *, name: str) -> RoleDefinition:
-    """Render the evaluate-mode templates into a ``RoleDefinition`` (D49)."""
+    """Render the evaluate-mode templates into a ``RoleDefinition`` (D49 + §B3)."""
     categories = [
-        Category(key=cat.key, label=cat.label, max=cat.max, icon=cat.icon or "•") for cat in rubric.categories
+        Category(
+            key=cat.key,
+            label=cat.label,
+            max=cat.max,
+            icon=cat.icon or "•",
+            anchors=[anchor.model_dump() for anchor in cat.anchors],
+            jd_sources=list(cat.jd_sources),
+            requirement_text=cat.requirement_text,
+        )
+        for cat in rubric.categories
     ]
     category_keys = ", ".join(cat.key for cat in rubric.categories)
     criteria = render_template(
@@ -148,6 +185,7 @@ def build_role_definition(rubric: RubricSchema, *, name: str) -> RoleDefinition:
         mode="evaluate",
         position_title=rubric.position_title,
         bonus_max=rubric.bonus_max,
+        bonus_signals=rubric.bonus_signals,
         category_keys=category_keys,
         categories=[cat.model_dump() for cat in rubric.categories],
         text_content="{{ text_content }}",
@@ -164,6 +202,8 @@ def build_role_definition(rubric: RubricSchema, *, name: str) -> RoleDefinition:
         position_title=rubric.position_title,
         categories=categories,
         bonus_max=rubric.bonus_max,
+        bonus_signals=rubric.bonus_signals,
+        derivation=rubric.derivation.model_dump() if rubric.derivation else None,
         criteria=criteria,
         system_message=system_message,
     )
@@ -180,12 +220,287 @@ def rebuild_role_definition(data: dict[str, Any]) -> RoleDefinition:
         name=rubric.name,
         position_title=rubric.position_title,
         categories=[
-            Category(key=cat.key, label=cat.label, max=cat.max, icon=cat.icon or "•") for cat in rubric.categories
+            Category(
+                key=cat.key,
+                label=cat.label,
+                max=cat.max,
+                icon=cat.icon or "•",
+                anchors=[anchor.model_dump() for anchor in cat.anchors],
+                jd_sources=list(cat.jd_sources),
+                requirement_text=cat.requirement_text,
+            )
+            for cat in rubric.categories
         ],
         bonus_max=rubric.bonus_max,
+        bonus_signals=rubric.bonus_signals,
+        derivation=rubric.derivation.model_dump() if rubric.derivation else None,
+        gate_miss=rubric.gate_miss,
         criteria=rubric.criteria,
         system_message=rubric.system_message,
     )
+
+
+# ============================================================================
+# S7-v2 partition gate (Fix 4 / §10.4) — hard grounding + soft coverage.
+# ============================================================================
+
+_STOPWORDS = frozenset(
+    {
+        "the",
+        "a",
+        "an",
+        "and",
+        "or",
+        "of",
+        "to",
+        "in",
+        "on",
+        "at",
+        "for",
+        "with",
+        "as",
+        "by",
+        "is",
+        "are",
+        "be",
+        "been",
+        "am",
+        "that",
+        "this",
+        "these",
+        "those",
+        "from",
+        "into",
+        "per",
+        "up",
+        "out",
+        "off",
+        "about",
+        "over",
+        "under",
+        "between",
+        "within",
+        "their",
+        "your",
+        "our",
+        "his",
+        "her",
+        "its",
+        "they",
+        "them",
+        "we",
+        "you",
+        "he",
+        "she",
+        "it",
+        "will",
+        "would",
+        "can",
+        "could",
+        "should",
+        "must",
+        "may",
+        "might",
+        "shall",
+        "not",
+        "no",
+        "do",
+        "does",
+        "did",
+        "have",
+        "has",
+        "had",
+        "was",
+        "were",
+        "being",
+    }
+)
+
+_CEILING_VOCAB = frozenset(
+    {
+        "client",
+        "customer",
+        "stakeholder",
+        "production",
+        "prod",
+        "ops",
+        "operations",
+        "operation",
+        "incident",
+        "incidents",
+        "uptime",
+        "reliability",
+        "sre",
+        "pager",
+        "sla",
+        "call",
+        "ownership",
+    }
+)
+
+
+def _norm(text: str) -> str:
+    return re.sub(r"[^0-9a-z]+", " ", text.casefold()).strip()
+
+
+def _tokens(text: str) -> frozenset[str]:
+    return frozenset(token for token in _norm(text).split() if len(token) > 1 and token not in _STOPWORDS)
+
+
+@dataclass
+class GateResult:
+    """S7-v2 partition-gate verdict (§10.4)."""
+
+    hard: list[str] = field(default_factory=list)
+    soft: list[str] = field(default_factory=list)
+
+    @property
+    def passed(self) -> bool:
+        return not self.hard and not self.soft
+
+
+def validate_partition(rubric: RubricSchema, jd: dict[str, Any]) -> GateResult:
+    """The S7-v2 gate: hard grounding (rubric→JD) + soft coverage (JD→rubric).
+
+    Hard (grounding, §10.4A): anchors well-formed, every ``jd_sources`` is a
+    literal string present in the JD payload, no band invents ceiling vocabulary
+    the payload lacks, and no ``removed`` entry swallows a stated requirement.
+    A grounding failure after the single targeted repair REJECTS the rubric.
+
+    Soft (coverage, §10.4B): every required skill and responsibility is assigned
+    to a category (scoreable/requirement_text/jd_sources/anchors) or to
+    eligibility — matched by normalized content-token overlap, so exact echo is
+    not required (D70: extractor pollution to eligibility passes). A coverage
+    failure after the repair accepts-with-flag (``gate_miss``).
+    """
+    result = GateResult()
+    jd_tokens: frozenset[str] = jd.get("jd_tokens") or frozenset()
+    required = list(jd.get("required_skills") or [])
+    responsibilities = list(jd.get("responsibilities") or [])
+
+    if not rubric.derivation.scoreable:
+        result.hard.append("derivation.scoreable must list every scoreable signal")
+
+    for cat in rubric.categories:
+        anchors = list(cat.anchors)
+        if not (2 <= len(anchors) <= 5):
+            result.hard.append(f"{cat.key}: anchors must have 2-5 bands (got {len(anchors)})")
+        else:
+            points = [anchor.min_points for anchor in anchors]
+            if points != sorted(points) or len(set(points)) != len(points):
+                result.hard.append(f"{cat.key}: anchors.min_points must be strictly ascending")
+            if points[0] != 0:
+                result.hard.append(f"{cat.key}: anchors must start at min_points 0")
+            if points[-1] > cat.max:
+                result.hard.append(f"{cat.key}: top anchor {points[-1]} exceeds max {cat.max}")
+
+        if not cat.jd_sources:
+            result.hard.append(f"{cat.key}: jd_sources must be non-empty literal JD strings")
+        for source in cat.jd_sources:
+            source_tokens = _tokens(source)
+            if not source_tokens:
+                result.hard.append(f"{cat.key}: jd_sources entry is empty")
+            elif not (source_tokens <= jd_tokens):
+                result.hard.append(f"{cat.key}: jd_sources {source!r} is not a literal string in the JD payload")
+
+        band_tokens: frozenset[str] = frozenset(token for anchor in anchors for token in _tokens(anchor.band))
+        invented = band_tokens & _CEILING_VOCAB - (jd_tokens & _CEILING_VOCAB)
+        if invented:
+            result.hard.append(
+                f"{cat.key}: bands invent ceiling vocabulary {sorted(invented)} not present in the JD payload"
+            )
+
+    required_token_sets = [_tokens(item) for item in required]
+    for item in rubric.derivation.removed:
+        removed_tokens = _tokens(item.field)
+        if not removed_tokens:
+            continue
+        for requirement, requirement_tokens in zip(required, required_token_sets, strict=False):
+            if requirement_tokens and removed_tokens <= requirement_tokens:
+                result.hard.append(
+                    f"removed {item.field!r} swallows required {requirement!r} — requirements stay scoreable"
+                )
+
+    anchor_text = " ".join(anchor.band for cat in rubric.categories for anchor in cat.anchors)
+    requirement_text = " ".join(cat.requirement_text for cat in rubric.categories)
+    jd_sources_text = " ".join(source for cat in rubric.categories for source in cat.jd_sources)
+    category_labels = " ".join(cat.label for cat in rubric.categories)
+    scoreable_text = " ".join(rubric.derivation.scoreable)
+    rubric_tokens = (
+        _tokens(requirement_text)
+        | _tokens(anchor_text)
+        | _tokens(jd_sources_text)
+        | _tokens(category_labels)
+        | _tokens(scoreable_text)
+    )
+    eligibility_tokens = _tokens(" ".join(rubric.derivation.eligibility))
+    assignment_tokens = rubric_tokens | eligibility_tokens
+
+    for requirement in required:
+        requirement_tokens = _tokens(requirement)
+        if not requirement_tokens:
+            continue
+        overlap = len(requirement_tokens & assignment_tokens)
+        if requirement_tokens <= assignment_tokens or overlap >= max(1, len(requirement_tokens) // 2):
+            continue
+        result.soft.append(f"required {requirement!r} is not covered by any category or eligibility entry")
+
+    for responsibility in responsibilities:
+        responsibility_tokens = _tokens(responsibility)
+        if not responsibility_tokens:
+            continue
+        overlap = len(responsibility_tokens & assignment_tokens)
+        if responsibility_tokens <= assignment_tokens or overlap >= 2 or overlap * 2 >= len(responsibility_tokens):
+            continue
+        result.soft.append(f"responsibility {responsibility!r} is not covered by any category or eligibility entry")
+
+    return result
+
+
+def _repair_enabled() -> bool:
+    """Testing escape hatch: set ``SCORING_DISABLE_RUBRIC_REPAIR=1`` to skip the
+    single gate-repair call (S7-v2 §10.4) and save calls/tokens during live runs.
+
+    When disabled, a hard grounding miss rejects immediately with no second call
+    and a soft coverage miss accepts-with-flag without regenerating.
+    """
+    return os.environ.get("SCORING_DISABLE_RUBRIC_REPAIR", "").strip().lower() not in {"1", "true", "yes"}
+
+
+def _repair_suffix(gate: GateResult) -> str:
+    """Targeted repair prompt for the single S7-v2 regeneration (§10.4 A/B)."""
+    parts = [
+        "Your previous rubric was rejected by the S7-v2 partition gate.",
+        "Fix ALL of the problems below and return the COMPLETE revised rubric JSON (same schema, full object):",
+    ]
+    if gate.hard:
+        parts.append("GROUNDING FAILURES (must fix):")
+        parts.extend(f"- {item}" for item in gate.hard)
+    if gate.soft:
+        parts.append("COVERAGE FAILURES (must fix):")
+        parts.extend(f"- {item}" for item in gate.soft)
+    return "\n\n" + "\n".join(parts)
+
+
+def _coerce_rubric(response: Any) -> RubricSchema:
+    """Parse + strictly validate a rubric-generation response (D49/D55-style)."""
+    try:
+        parsed = json.loads(extract_json_from_response(response.content or ""))
+        return RubricSchema.model_validate(parsed)
+    except Exception as exc:
+        raise RubricGenerationFailedError(
+            "rubric generation returned malformed or non-schema output",
+            details={"cause": type(exc).__name__, "content_prefix": (response.content or "")[:200]},
+        ) from exc
+
+
+def _flag_gate_miss(gate: GateResult) -> dict[str, Any]:
+    return {
+        "grounding": list(gate.hard),
+        "items": list(gate.soft),
+        "repair_used": True,
+        "iteration": 2,
+    }
 
 
 async def generate_rubric(
@@ -198,34 +513,42 @@ async def generate_rubric(
     adapter_factory: Callable[[str], Any] | None = None,
     before_call: Callable[[], None] | None = None,
 ) -> tuple[RoleDefinition, str]:
-    """Generate + build one rubric for a JD snapshot (exactly 1 routed call, D49).
+    """Generate + build one rubric for a JD snapshot (1 or 2 routed calls, D49/D71).
 
-    ``before_call`` is the scorer's call-counter hook (D54); it runs *before* the
-    routed call so a budget refusal propagates as ``ScoringBudgetExceededError``
-    and is never swallowed by generation error handling.
+    ``before_call`` is the scorer's call-counter hook (D54/D71); it runs *before*
+    each routed call so a budget refusal propagates as
+    ``ScoringBudgetExceededError`` and is never swallowed by the generation error
+    handling.
 
-    Returns ``(role_def, rubric_sha256)``. A failed/disabled provider chain or an
-    unparseable/unvalidated response raises ``RubricGenerationFailedError``.
+    Returns ``(role_def, rubric_sha256)``. Malformed output raises
+    ``RubricGenerationFailedError`` after a single call (no retry, D54).
+    Provider exhaustion raises ``ProvidersExhaustedError`` **unchanged** so the
+    live skip-guard fires (Fix 2/D68). The single gate-repair call runs only when
+    ``SCORING_DISABLE_RUBRIC_REPAIR`` is unset/0 (testing escape hatch: hard
+    misses reject immediately, soft misses accept-with-flag, one call only). A
+    rubric that still fails the hard grounding gate raises
+    ``RubricGenerationFailedError``; a soft coverage miss after the repair is
+    accepted-with-flag (``role_def.gate_miss``).
     """
-    summary = jd_summary(jd_payload)
-    prompt = render_template(
+    jd = jd_input(jd_payload)
+    base_prompt = render_template(
         "rubric_generator_prompt.jinja",
         fallback=_RUBRIC_PROMPT_FALLBACK,
         mode="generate",
-        **summary,
+        title=jd["title"],
+        jd_json=jd["jd_json"],
     )
     system_message = render_template(
         "rubric_generator_system.jinja",
         fallback=_RUBRIC_SYSTEM_FALLBACK,
         mode="generate",
-        title=summary["title"],
+        title=jd["title"],
     )
 
-    if before_call is not None:
-        before_call()
-
-    try:
-        response = await route_llm_request(
+    async def _route(prompt: str) -> Any:
+        if before_call is not None:
+            before_call()
+        return await route_llm_request(
             conn,
             user_id=user_id,
             prompt=prompt,
@@ -236,20 +559,76 @@ async def generate_rubric(
             step="rubric_generation",
             adapter_factory=adapter_factory,
         )
+
+    try:
+        response = await _route(base_prompt)
+    except ProvidersExhaustedError as exc:
+        logger.error(
+            "rubric_generation: all providers exhausted",
+            extra={
+                "data": {
+                    "job_id": str(job_id),
+                    "step": "rubric_generation",
+                    "cause": type(exc).__name__,
+                    "attempts": exc.details.get("attempts"),
+                    "providers_consumed": exc.details.get("providers_consumed"),
+                }
+            },
+        )
+        raise
     except Exception as exc:
         raise RubricGenerationFailedError(
             "rubric generation exhausted every configured provider",
             details={"cause": type(exc).__name__},
         ) from exc
 
-    try:
-        parsed = json.loads(extract_json_from_response(response.content or ""))
-        rubric = RubricSchema.model_validate(parsed)
-    except Exception as exc:
+    rubric = _coerce_rubric(response)
+    gate = validate_partition(rubric, jd)
+    if not gate.passed and _repair_enabled():
+        try:
+            response = await _route(base_prompt + _repair_suffix(gate))
+        except ProvidersExhaustedError as exc:
+            logger.error(
+                "rubric_generation repair: all providers exhausted",
+                extra={
+                    "data": {
+                        "job_id": str(job_id),
+                        "step": "rubric_generation",
+                        "cause": type(exc).__name__,
+                        "attempts": exc.details.get("attempts"),
+                        "providers_consumed": exc.details.get("providers_consumed"),
+                    }
+                },
+            )
+            raise
+        except Exception as exc:
+            raise RubricGenerationFailedError(
+                "rubric generation repair exhausted every configured provider",
+                details={"cause": type(exc).__name__},
+            ) from exc
+        rubric = _coerce_rubric(response)
+        gate = validate_partition(rubric, jd)
+    if gate.hard:
+        logger.error(
+            "rubric_generation: rejected by the grounding gate",
+            extra={"data": {"job_id": str(job_id), "step": "rubric_generation", "gate": _flag_gate_miss(gate)}},
+        )
         raise RubricGenerationFailedError(
-            "rubric generation returned malformed or non-schema output",
-            details={"cause": type(exc).__name__, "content_prefix": (response.content or "")[:200]},
-        ) from exc
+            "rubric failed the S7-v2 grounding gate",
+            details={"gate": _flag_gate_miss(gate)},
+        )
 
     role_def = build_role_definition(rubric, name=f"job-{job_id}")
+    if gate.soft and not gate.hard:
+        role_def = RoleDefinition(
+            name=role_def.name,
+            position_title=role_def.position_title,
+            categories=role_def.categories,
+            bonus_max=role_def.bonus_max,
+            bonus_signals=role_def.bonus_signals,
+            derivation=role_def.derivation,
+            criteria=role_def.criteria,
+            system_message=role_def.system_message,
+            gate_miss=_flag_gate_miss(gate),
+        )
     return role_def, rubric_sha256(persist_envelope(role_def))

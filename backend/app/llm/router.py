@@ -45,7 +45,7 @@ from backend.app.llm.registry import is_registered, spec_for
 
 TRIP_THRESHOLD = 3
 COOLDOWN_FLOOR_SECONDS = 30.0
-DEFAULT_TIMEOUT_SECONDS = 20.0
+DEFAULT_TIMEOUT_SECONDS = 60.0
 VALID_PIPELINE_STEPS = frozenset(
     {"jd_extraction", "rubric_generation", "scoring", "optimization", "package_generation"}
 )

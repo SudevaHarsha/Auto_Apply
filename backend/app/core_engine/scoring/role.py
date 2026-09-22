@@ -8,12 +8,15 @@ in the tree only to anchor the copy lineage; AutoApply's runtime uses
 ``RoleDefinition`` is the rubric-generator envelope: it carries the *rendered*
 evaluation criteria/system prompt strings plus the role.json-shaped fields, and
 derives ``max_final_score`` the same way the vendor's ``role.json`` loader does
-(sum of category max + bonus_max).
+(sum of category max + bonus_max). S7-v2 §B3/§10.4 extends it with the per-category
+``anchors``/``jd_sources``/``requirement_text``, ``bonus_signals``, the
+``derivation`` partition trail and the ``gate_miss`` soft-coverage flag — all
+defaulted so v1 builders and cached v1 envelopes still round-trip (B4).
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 @dataclass(frozen=True)
@@ -24,6 +27,9 @@ class Category:
     label: str
     max: int
     icon: str = "•"
+    anchors: list = field(default_factory=list)
+    jd_sources: list = field(default_factory=list)
+    requirement_text: str = ""
 
 
 @dataclass(frozen=True)
@@ -57,6 +63,9 @@ class RoleDefinition:
     criteria: str
     system_message: str
     min_final_score: int = 0
+    bonus_signals: list = field(default_factory=list)
+    derivation: dict | None = None
+    gate_miss: dict | None = None
 
     @property
     def max_final_score(self) -> int:

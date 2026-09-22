@@ -3,13 +3,17 @@
 ``test_guards.py::test_vendor_read_only`` pins the vendor *bytes* via
 ``scripts/vendor.sha256``. This guard pins the *copy* side: the AutoApply
 scoring modules must keep the vendored skeleton verbatim so future edits remain
-diffable against ``vendor/hiring_agent``. Two documented S7 deltas are allowed
-and pinned separately (they are intentional, not drift):
+diffable against ``vendor/hiring_agent``. Documented deltas are allowed and
+pinned separately (they are intentional, not drift):
 
 * ``resume_text.py`` renders single-date ``Period:`` lines and adds project
   ``Technologies:``/``Skills:`` (S7 §8).
 * ``role.py`` adds a non-vendored ``RoleDefinition``; ``Category`` and the
   vendored field lines stay verbatim.
+* ``scoring_models.py`` removes ``Deductions`` and adds ``evidence_strength``
+  (C1 → opaque penalties replaced by ``critical_gaps``/``eligibility``);
+  ``scorer.py`` drops ``total -= evaluation.deductions.total`` from the math
+  (S7-v2 §10, Fix 4/C1).
 
 Math skeleton pinned semantically (``_total_math`` re-structured but identical
 expressions); evaluation schemas pinned line-verbatim (``Type``→``type`` alias
@@ -75,10 +79,33 @@ def test_scoring_total_math_skeleton() -> None:
         'min(data["score"], data["max"])',
         'max_score += data["max"]',
         "total += evaluation.bonus_points.total",
-        "total -= evaluation.deductions.total",
         "role.bonus_max",
     ):
         _assert_has(ours, snippet, where="scorer.py")
+    assert "total -= evaluation.deductions.total" not in ours, (
+        "scorer.py: deductions math re-introduced (C1/S7-v2 removed it)"
+    )
+
+
+def test_scoring_s7_v2_deduction_removal_and_eligibility_deltas_pinned() -> None:
+    """C1/S7-v2 deltas: Deductions gone, evidence strength + eligibility added."""
+    ours = _text(SCORING / "scoring_models.py")
+    assert "class Deductions(BaseModel):" not in ours, (
+        "scoring_models.py: opaque Deductions model re-introduced (C1/S7-v2)"
+    )
+    _assert_has(
+        ours,
+        "evidence_strength: int = Field(ge=0, le=3,",
+        where="scoring_models.py",
+    )
+    _assert_has(ours, "class Eligibility(BaseModel):", where="scoring_models.py")
+    _assert_has(ours, "eligibility=(Eligibility, ...)", where="scoring_models.py")
+    _assert_has(
+        ours,
+        'Field(default_factory=list, description="Required skills/conditions the resume is missing"),',
+        where="scoring_models.py",
+    )
+    _assert_has(ours, "def build_evaluation_model(", where="scoring_models.py")
 
 
 def test_scoring_models_keep_vendor_skeleton() -> None:
@@ -89,7 +116,6 @@ def test_scoring_models_keep_vendor_skeleton() -> None:
         'score: float = Field(ge=0, description="Score achieved in this category")',
         'max: int = Field(gt=0, description="Maximum possible score")',
         'evidence: str = Field(min_length=1, description="Evidence supporting the score")',
-        "class Deductions(BaseModel):",
         "fields = {category.key: (CategoryScore, ...) for category in categories}",
         'return create_model("Scores", **fields)',
         'Field(ge=0, le=role.bonus_max, description="Total bonus points")',
@@ -127,3 +153,19 @@ def test_scoring_role_definition_is_autoapply_owned() -> None:
     _assert_has(ours, "class RoleDefinition:", where="role.py")
     _assert_has(ours, "def max_final_score(self) -> int:", where="role.py")
     assert "read_text(encoding=" not in ours, "role.py: vendored role.json file loading must not appear in AutoApply"
+
+
+def test_scoring_rubric_repair_env_toggle_pinned() -> None:
+    """S7-v2 live testing: the gate-repair call is gated by SCORING_DISABLE_RUBRIC_REPAIR."""
+    ours = _text(SCORING / "rubric_generator.py")
+    _assert_has(ours, "def _repair_enabled() -> bool:", where="rubric_generator.py")
+    _assert_has(
+        ours,
+        'os.environ.get("SCORING_DISABLE_RUBRIC_REPAIR", "").strip().lower() not in {"1", "true", "yes"}',
+        where="rubric_generator.py",
+    )
+    _assert_has(
+        ours,
+        "if not gate.passed and _repair_enabled():",
+        where="rubric_generator.py",
+    )

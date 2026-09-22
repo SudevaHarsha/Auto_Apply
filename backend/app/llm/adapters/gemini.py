@@ -106,7 +106,9 @@ class GeminiAdapter:
                 latency_ms=latency_ms,
             )
         error_type = (
-            "invalid_key"
+            "insufficient_credits"
+            if resp.status_code == 402
+            else "invalid_key"
             if resp.status_code == 401
             else "model_not_found"
             if resp.status_code == 404

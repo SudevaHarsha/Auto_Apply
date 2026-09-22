@@ -1,12 +1,15 @@
-"""S7 - core_engine scoring integration tests (T7, D48-D58).
+"""S7 - core_engine scoring integration tests (T7, D48-D58 + S7-v2 §10).
 
 Covers rubric generation + cache (D49/D58), the strict two-mode AutoApply
 templates (T7-1), normalized score math (D50), the 85-gate (D51), per-facet
 ``rubric_evidence`` rows with the summary block on the first (D52/I7), the
-``job_scored``/``profile_scored`` audits (D53), the hard 2-call budget (D54),
-the schema-version guard (D55), all-or-nothing persistence including the
-``rubric_cache`` upsert (D56/D58/T7-10), the 0-LLM injection scan (D57), and
-provider-failure/refusal/malformed-output handling with zero retries.
+``job_scored``/``profile_scored`` audits (D53), the hard 3-call budget
+(D54/D71: rubric ≤ 2 + evaluation = 1), the schema-version guard (D55),
+all-or-nothing persistence including the ``rubric_cache`` upsert (D56/D58/T7-10),
+the 0-LLM injection scan (D57), the S7-v2 partition gate (Fix 4: the mock
+RUBRIC is gate-passing, so fresh scores take exactly 2 calls), provider
+exhaustion re-raised unchanged (Fix 2/D68 → ``ProvidersExhaustedError``), and
+malformed-output handling with zero retries.
 
 Zero-network: every LLM interaction is the scripted mock provider
 (``tests.doubles.mock_provider``); ``jobs``/``job_snapshots``/``profiles`` are
@@ -63,6 +66,7 @@ from backend.app.core_engine.scoring.scorer import (  # noqa: E402
 )
 from backend.app.db.context import DbContext  # noqa: E402
 from backend.app.db.repositories.core_engine_repository import CoreEngineRepository  # noqa: E402
+from backend.app.llm.errors import ProvidersExhaustedError  # noqa: E402
 from backend.app.llm.service import LlmProviderService  # noqa: E402
 from tests.doubles.mock_provider import http, ok, scripted_factory  # noqa: E402
 
@@ -74,33 +78,116 @@ FIXTURES = ROOT / "tests" / "fixtures" / "scoring"
 RUBRIC = {
     "position_title": "Senior Backend Engineer",
     "bonus_max": 10,
+    "bonus_signals": ["FinTech experience", "startup exposure"],
     "categories": [
-        {"key": "core_experience", "label": "Core Experience", "max": 40},
-        {"key": "skills_match", "label": "Skills Match", "max": 30},
-        {"key": "leadership", "label": "Leadership", "max": 20},
+        {
+            "key": "core_experience",
+            "label": "Core Experience",
+            "max": 40,
+            "requirement_text": "Own the backend service, design and ship REST APIs",
+            "jd_sources": ["Own the backend service"],
+            "anchors": [
+                {"min_points": 0, "band": "no backend experience within the 5-8 year range"},
+                {"min_points": 2, "band": "some backend experience with gaps versus the 5-8 year range"},
+                {"min_points": 4, "band": "solid backend experience matching the 5-8 year range"},
+                {"min_points": 5, "band": "strong backend experience at the top of the 5-8 year range"},
+            ],
+        },
+        {
+            "key": "skills_match",
+            "label": "Skills Match",
+            "max": 30,
+            "requirement_text": "Python, PostgreSQL, Docker and REST APIs",
+            "jd_sources": ["Python", "PostgreSQL", "Docker", "REST APIs"],
+            "anchors": [
+                {"min_points": 0, "band": "meets none of the required stack"},
+                {"min_points": 2, "band": "meets a few of the required stack"},
+                {"min_points": 3, "band": "meets most of the required stack"},
+                {"min_points": 4, "band": "meets the full required stack"},
+            ],
+        },
+        {
+            "key": "leadership",
+            "label": "Leadership",
+            "max": 20,
+            "requirement_text": "Mentor junior engineers",
+            "jd_sources": ["Mentor junior engineers"],
+            "anchors": [
+                {"min_points": 0, "band": "no mentoring experience"},
+                {"min_points": 1, "band": "occasional mentoring of junior engineers"},
+                {"min_points": 3, "band": "regularly mentors junior engineers"},
+            ],
+        },
     ],
+    "derivation": {
+        "scoreable": [
+            "Python",
+            "PostgreSQL",
+            "Docker",
+            "REST APIs",
+            "Own the backend service",
+            "Design and ship REST APIs",
+            "Mentor junior engineers",
+        ],
+        "eligibility": ["Remote", "Full-time", "work authorization and visa sponsorship"],
+        "removed": [
+            {"field": "salary expectations", "role": "noise", "reason": "negotiation detail, not a scoring signal"},
+        ],
+    },
 }
 
 EVAL_HIGH = {
     "scores": {
-        "core_experience": {"score": 40, "max": 40, "evidence": "6y Python backend"},
-        "skills_match": {"score": 30, "max": 30, "evidence": "Full required stack"},
-        "leadership": {"score": 15, "max": 20, "evidence": "Mentors three juniors"},
+        "core_experience": {
+            "score": 40,
+            "max": 40,
+            "evidence": "6y Python backend ownership",
+            "evidence_strength": 3,
+        },
+        "skills_match": {
+            "score": 30,
+            "max": 30,
+            "evidence": "Full required stack",
+            "evidence_strength": 3,
+        },
+        "leadership": {
+            "score": 15,
+            "max": 20,
+            "evidence": "Mentors three juniors",
+            "evidence_strength": 2,
+        },
     },
     "bonus_points": {"total": 8, "breakdown": "FinTech exposure"},
-    "deductions": {"total": 0, "reasons": "none"},
+    "eligibility": {"eligible": True, "blocked_reasons": []},
+    "critical_gaps": [],
     "key_strengths": ["Python backend depth"],
     "areas_for_improvement": ["More leadership evidence"],
 }
 
 EVAL_LOW = {
     "scores": {
-        "core_experience": {"score": 20, "max": 40, "evidence": "Some backend work"},
-        "skills_match": {"score": 10, "max": 30, "evidence": "Partial stack"},
-        "leadership": {"score": 10, "max": 20, "evidence": "Occasional mentoring"},
+        "core_experience": {
+            "score": 20,
+            "max": 40,
+            "evidence": "Some backend work",
+            "evidence_strength": 1,
+        },
+        "skills_match": {
+            "score": 10,
+            "max": 30,
+            "evidence": "Partial stack",
+            "evidence_strength": 1,
+        },
+        "leadership": {
+            "score": 10,
+            "max": 20,
+            "evidence": "Occasional mentoring",
+            "evidence_strength": 1,
+        },
     },
     "bonus_points": {"total": 0, "breakdown": "none"},
-    "deductions": {"total": 5, "reasons": "vague achievements"},
+    "eligibility": {"eligible": True, "blocked_reasons": []},
+    "critical_gaps": ["PostgreSQL depth beyond basics"],
     "key_strengths": ["Willing to learn"],
     "areas_for_improvement": ["Depth in required skills"],
 }
@@ -272,17 +359,15 @@ def test_normalize_and_total_math() -> None:
     evaluation = SimpleNamespace(
         scores=SimpleNamespace(model_dump=lambda: scores),
         bonus_points=SimpleNamespace(total=8, breakdown="FinTech"),
-        deductions=SimpleNamespace(total=5, reasons="vague"),
     )
     role = _role_from(RUBRIC)
     total, max_final_score = _total_math(evaluation, role)
-    assert (total, max_final_score) == (88.0, 100.0)  # 85 + 8 - 5 = 88, ceiling 90+10
-    assert normalize(total, max_final_score) == 88
+    assert (total, max_final_score) == (93.0, 100.0)  # 85 + 8, no deductions (S7-v2 C1)
+    assert normalize(total, max_final_score) == 93
     over_cap, over_max = _total_math(
         SimpleNamespace(
             scores=SimpleNamespace(model_dump=lambda: scores),
             bonus_points=SimpleNamespace(total=50, breakdown=""),
-            deductions=SimpleNamespace(total=0, reasons=""),
         ),
         role,
     )
@@ -297,7 +382,8 @@ def test_score_gate_threshold() -> None:
 
 
 def test_call_limiter_is_hard_cap() -> None:
-    limiter = _CallLimiter(2)
+    limiter = _CallLimiter(3)  # D71: rubric ≤ 2 (1 gen + 1 repair) + 1 eval
+    limiter.consume()
     limiter.consume()
     limiter.consume()
     with pytest.raises(ScoringBudgetExceededError):
@@ -342,12 +428,16 @@ async def test_score_job_fresh_generates_and_commits() -> None:
             result = await score_job(conn, user_id=user.id, job_id=seed["job_id"], adapter_factory=factory)
 
         assert steps == ["rubric_generation", "scoring"]  # D48 step wiring
-        assert _call_count(adapters) == 2  # fresh = exact 2 calls (D54)
-        assert result.normalized == 93  # (40+30+15)+8-0 over (90+10) -> 93
+        assert _call_count(adapters) == 2  # fresh, gate-clean = exactly 2 (D71)
+        assert result.normalized == 93  # (40+30+15)+8 over (90+10) -> 93
         assert should_auto_package(result.normalized) is True  # D51
         assert result.rubric_sha256
         assert result.injection_flagged is False
+        assert result.gate_miss is None  # gate-passing rubric (Fix 4)
+        assert result.eligible is True and result.blocked_reasons == []
+        assert result.critical_gaps == []
         assert [f.key for f in result.per_facet] == ["core_experience", "skills_match", "leadership"]
+        assert all(f.evidence_strength > 0 for f in result.per_facet)  # C1
         assert result.strengths == ["Python backend depth"]
         assert result.latency_ms >= 0 and result.model
 
@@ -364,7 +454,10 @@ async def test_score_job_fresh_generates_and_commits() -> None:
         assert first["file_url"] == f"internal://scoring/{seed['job_id']}/core_experience"
         assert first["metadata"]["strengths"] == ["Python backend depth"]
         assert first["metadata"]["evaluation"]["bonus_points"]["total"] == 8
+        assert first["metadata"]["eligibility"]["eligible"] is True
+        assert first["metadata"]["critical_gaps"] == []
         assert first["metadata"]["rubric_sha256"] == result.rubric_sha256
+        assert "gate_miss" not in first["metadata"]  # clean gate → no flag (Fix 4B)
         assert all("strengths" not in r["metadata"] for r in evidence[1:])  # summary rides first only
         # D53 job_scored audit
         audits = await _audits(conn, user.id, "job_scored")
@@ -393,10 +486,13 @@ async def test_scoring_call_shapes_json_mode_and_schema() -> None:
         assert calls[1]["json_mode"] is True
         schema = calls[1]["output_schema"]
         assert "scores" in schema["properties"] and "bonus_points" in schema["properties"]
+        assert "eligibility" in schema["properties"] and "critical_gaps" in schema["properties"]
         # evaluation prompt carries the resume text (D48)
         assert "Ada Lovelace" in calls[1]["prompt"]
-        # rubric prompt carried the JD summary fields (D49 input contract)
-        assert "REQUIRED SKILLS: Python; PostgreSQL" in calls[0]["prompt"]
+        # rubric prompt carries the title + the ENTIRE structured JD payload (B1)
+        assert "TITLE: Senior Backend Engineer" in calls[0]["prompt"]
+        assert "ENTIRE STRUCTURED JD PAYLOAD" in calls[0]["prompt"]
+        assert '"required":["Python","PostgreSQL","Docker","REST APIs"]' in calls[0]["prompt"]
     finally:
         await conn.close()
 
@@ -425,9 +521,11 @@ async def test_rubric_provider_exhausted_raises_and_rolls_back() -> None:
         await _add_provider(conn, user.id)
         seed = await _seed(conn, user)
         factory, adapters, _ = scripted_factory({"gemini": [http(500)]})
-        with pytest.raises(RubricGenerationFailedError):
+        # Fix 2/D68: provider exhaustion escapes as ProvidersExhaustedError,
+        # NOT RubricGenerationFailedError, so outage handling stays distinct.
+        with pytest.raises(ProvidersExhaustedError):
             await score_job(conn, user_id=user.id, job_id=seed["job_id"], adapter_factory=factory)
-        assert _call_count(adapters) == 1  # exactly one rubric attempt (D54)
+        assert _call_count(adapters) == 1  # exactly one rubric attempt (D54/D71)
         assert await _rubric_count(conn, seed["job_id"]) == 0
         assert await _evidence_rows(conn, user.id) == []
     finally:
@@ -469,7 +567,8 @@ async def test_rubric_cache_hit_second_score_flag_declarations() -> None:
         second = await score_job(conn, user_id=user.id, job_id=seed["job_id"], adapter_factory=factory2)
         assert _call_count(adapters2) == 1  # cache hit: evaluation only (D58)
         assert second.rubric_sha256 == first.rubric_sha256
-        assert second.normalized == 35  # (20+10+10)+0-5 over 100 -> 35, capped math
+        assert second.normalized == 40  # (20+10+10)+0 over 100 -> 40, no deductions (S7-v2 C1)
+        assert second.critical_gaps == ["PostgreSQL depth beyond basics"]
         assert should_auto_package(second.normalized) is False  # D51 low path
         assert await _rubric_count(conn, seed["job_id"]) == 1  # still one row
         evidence = await _evidence_rows(conn, user.id)
@@ -528,7 +627,11 @@ async def test_rubric_cache_invalidated_on_snapshot_change() -> None:
                 (str(snapshot2), str(seed["job_id"])),
             )
 
-        factory2, adapters2, _ = scripted_factory({"gemini": [ok(json.dumps(RUBRIC)), ok(json.dumps(EVAL_HIGH))]})
+        rubric2 = json.loads(json.dumps(RUBRIC))
+        rubric2["derivation"]["scoreable"].append("Terraform")
+        rubric2["categories"][1]["requirement_text"] += ", Terraform"
+        rubric2["categories"][1]["jd_sources"].append("Terraform")
+        factory2, adapters2, _ = scripted_factory({"gemini": [ok(json.dumps(rubric2)), ok(json.dumps(EVAL_HIGH))]})
         await score_job(conn, user_id=user.id, job_id=seed["job_id"], adapter_factory=factory2)
         assert _call_count(adapters2) == 2  # new snapshot -> guaranteed cache miss (D58/T7 9d)
         async with DbContext(conn, user.id).transaction() as db:

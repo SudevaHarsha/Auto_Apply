@@ -1,4 +1,4 @@
-"""Score orchestration (D50/D52/D53/D55/D56/D57/D58).
+"""Score orchestration (D50/D52/D53/D55/D56/D57/D58 + S7-v2 C3).
 
 ``score_job`` / ``score_profile`` map 1:1 to ``POST /jobs/{id}/score`` and
 ``POST /profiles/{id}/analyze``:
@@ -9,8 +9,14 @@ one transaction: ``jobs.score`` + ``profiles.last_scored_at`` + ``rubric_cache``
 upsert + one ``rubric_evidence`` row per facet (summary block on the first, D52/I7)
 + ``job_scored`` / ``profile_scored`` audit (D53).
 
-Call budget: rubric (fresh only) + evaluation = 2 routed calls max, no retries
-(D54); ``_CallLimiter`` makes the cap a hard error, not a soft skip.
+Call budget (D71): rubric ≤ 2 (1 generation + at most 1 targeted gate repair) +
+evaluation = 1 → hard cap 3; cache-hit re-score = 1. ``_CallLimiter`` makes the
+cap a hard error, not a soft skip.
+
+S7-v2 C3: ``Deductions`` is gone (no opaque penalties) — gaps surface as
+``critical_gaps`` + ``eligibility.blocked_reasons``; each facet carries the
+``evidence_strength``; a ``gate_miss`` (soft-coverage accept-after-repair,
+Fix 4B) rides the summary metadata so rubric quality is observable.
 """
 
 from __future__ import annotations
@@ -51,6 +57,7 @@ class RubricFacetScore:
     max: int
     score: float
     evidence: str
+    evidence_strength: int = 0
 
 
 @dataclass
@@ -65,8 +72,10 @@ class ScoreResult:
     improvements: list[str] = field(default_factory=list)
     bonus: float = 0.0
     bonus_breakdown: str = ""
-    deductions: float = 0.0
-    deduction_reasons: str = ""
+    eligible: bool = True
+    blocked_reasons: list[str] = field(default_factory=list)
+    critical_gaps: list[str] = field(default_factory=list)
+    gate_miss: dict[str, Any] | None = None
     evaluation: dict[str, Any] = field(default_factory=dict)
     model: str = ""
     latency_ms: int = 0
@@ -75,7 +84,7 @@ class ScoreResult:
 
 
 class _CallLimiter:
-    """D54: hard routed-call counter — rubric ≤ 1 + evaluation = 1, no retries."""
+    """D54/D71: hard routed-call counter — rubric ≤ 2 + evaluation = 1, no retries."""
 
     def __init__(self, cap: int):
         self.cap = cap
@@ -91,10 +100,12 @@ class _CallLimiter:
 
 
 def _total_math(evaluation: Any, role: RoleDefinition) -> tuple[float, float]:
-    """Total math copied from vendor ``score.py:66-90`` (D50).
+    """Total math copied from vendor ``score.py:66-90`` (D50, S7-v2 C3).
 
-    total = Σ min(score, max) + bonus − deductions, capped at max_possible =
-    Σ max + bonus_max. Returns ``(total, max_final_score)``.
+    total = Σ min(score, max) + bonus, capped at max_possible =
+    Σ max + bonus_max. ``Deductions`` were removed in S7-v2 (no opaque
+    penalties — gaps report via ``critical_gaps``/``eligibility``). Returns
+    ``(total, max_final_score)``.
     """
     total = 0.0
     max_score = 0
@@ -106,8 +117,6 @@ def _total_math(evaluation: Any, role: RoleDefinition) -> tuple[float, float]:
 
     if getattr(evaluation, "bonus_points", None):
         total += evaluation.bonus_points.total
-    if getattr(evaluation, "deductions", None):
-        total -= evaluation.deductions.total
 
     max_final_score = float(max_score + role.bonus_max)
     return min(total, max_final_score), max_final_score
@@ -162,8 +171,11 @@ def _summary_block(evaluation: Any, evaluation_dict: dict[str, Any]) -> dict[str
         "improvements": list(evaluation.areas_for_improvement),
         "bonus": evaluation.bonus_points.total,
         "bonus_breakdown": evaluation.bonus_points.breakdown,
-        "deductions": evaluation.deductions.total,
-        "deduction_reasons": evaluation.deductions.reasons,
+        "eligibility": {
+            "eligible": bool(evaluation.eligibility.eligible),
+            "blocked_reasons": list(evaluation.eligibility.blocked_reasons),
+        },
+        "critical_gaps": list(evaluation.critical_gaps),
         "evaluation": evaluation_dict,
     }
 
@@ -221,7 +233,7 @@ async def _score(
         resume_text = convert_json_resume_to_text(JSONResume.model_validate(profile["json_resume"]))
         cleaned_text, injection_flagged = sanitize_resume_text(resume_text)
 
-        limiter = _CallLimiter(2)
+        limiter = _CallLimiter(3)
         if rubric is not None:
             role_def = rubric
             sha: str | None = None
@@ -259,6 +271,7 @@ async def _score(
                 max=cat.max,
                 score=full_scores.get(cat.key, {}).get("score", 0),
                 evidence=full_scores.get(cat.key, {}).get("evidence", ""),
+                evidence_strength=full_scores.get(cat.key, {}).get("evidence_strength", 0),
             )
             for cat in role_def.categories
         ]
@@ -283,9 +296,13 @@ async def _score(
                 "max": cat.max,
                 "score": value.get("score", 0),
                 "evidence": value.get("evidence", ""),
+                "evidence_strength": value.get("evidence_strength", 0),
                 "model": model,
                 "latency_ms": latency_ms,
             }
+            if role_def.gate_miss is not None and index == 0:
+                # Fix 4B: soft-coverage accept-after-repair is observable.
+                metadata["gate_miss"] = role_def.gate_miss
             if sha is not None:
                 metadata["rubric_sha256"] = sha
             if index == 0:
@@ -328,8 +345,10 @@ async def _score(
             improvements=list(evaluation.areas_for_improvement),
             bonus=evaluation.bonus_points.total,
             bonus_breakdown=evaluation.bonus_points.breakdown,
-            deductions=evaluation.deductions.total,
-            deduction_reasons=evaluation.deductions.reasons,
+            eligible=bool(evaluation.eligibility.eligible),
+            blocked_reasons=list(evaluation.eligibility.blocked_reasons),
+            critical_gaps=list(evaluation.critical_gaps),
+            gate_miss=role_def.gate_miss,
             evaluation=evaluation_dict,
             model=model,
             latency_ms=latency_ms,

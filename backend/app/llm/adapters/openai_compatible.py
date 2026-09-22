@@ -11,6 +11,7 @@ from backend.app.llm.adapters.base import ChatResponse
 from backend.app.llm.schema_dialects import openai_compatible_schema
 
 OUTPUT_SCHEMA_NAME = "structured_output"
+MAX_SCHEMA_OUTPUT_TOKENS = 16384
 _CHAT_COMPLETIONS = "/chat/completions"
 
 
@@ -70,6 +71,7 @@ class OpenAICompatibleAdapter:
                         "schema": openai_compatible_schema(output_schema),
                     },
                 }
+                body["max_tokens"] = MAX_SCHEMA_OUTPUT_TOKENS
             else:
                 body["response_format"] = {"type": "json_object"}
         headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
@@ -123,7 +125,13 @@ class OpenAICompatibleAdapter:
                 latency_ms=latency_ms,
             )
         error_type = (
-            "invalid_key" if resp.status_code == 401 else "server_error" if resp.status_code >= 500 else "http_error"
+            "insufficient_credits"
+            if resp.status_code == 402
+            else "invalid_key"
+            if resp.status_code == 401
+            else "server_error"
+            if resp.status_code >= 500
+            else "http_error"
         )
         return ChatResponse(
             status="http_error",
