@@ -164,6 +164,28 @@ def persist_envelope(role_def: RoleDefinition) -> dict[str, Any]:
     }
 
 
+def _shared_anchor_bands(categories: list[Any]) -> dict[str, Any] | None:
+    """If every category has an identical ``(min_points, band)`` ladder, return it
+    once as ``{"default_bands": [...], "categories": [...]}`` so the eval prompt
+    renders the shared ladder a single time instead of N copies (eval token cut).
+
+    ``categories`` entries are already dicts (``cat.model_dump()``). Returns:
+    - ``None`` when categories carry distinct ladders (render each inline).
+    - a per-category dict with ``custom_bands=True`` for ladders that differ, so
+      the template only prints bands that are actually category-specific.
+    """
+    if not categories:
+        return None
+    first = [(a["min_points"], a["band"]) for a in categories[0].get("anchors", [])]
+    all_identical = all(
+        [(a["min_points"], a["band"]) for a in cat.get("anchors", [])] == first for cat in categories[1:]
+    )
+    if not all_identical or not first:
+        return None
+    default_bands = [{"min_points": min_points, "band": band} for min_points, band in first]
+    return {"default_bands": default_bands, "custom_bands": False}
+
+
 def build_role_definition(rubric: RubricSchema, *, name: str) -> RoleDefinition:
     """Render the evaluate-mode templates into a ``RoleDefinition`` (D49 + §B3)."""
     categories = [
@@ -178,6 +200,14 @@ def build_role_definition(rubric: RubricSchema, *, name: str) -> RoleDefinition:
         )
         for cat in rubric.categories
     ]
+    category_dicts = [cat.model_dump() for cat in rubric.categories]
+    shared = _shared_anchor_bands(category_dicts)
+    if shared is not None:
+        for cat_dict in category_dicts:
+            cat_dict["custom_bands"] = False
+    else:
+        for cat_dict in category_dicts:
+            cat_dict["custom_bands"] = True
     category_keys = ", ".join(cat.key for cat in rubric.categories)
     criteria = render_template(
         "rubric_generator_prompt.jinja",
@@ -187,7 +217,8 @@ def build_role_definition(rubric: RubricSchema, *, name: str) -> RoleDefinition:
         bonus_max=rubric.bonus_max,
         bonus_signals=rubric.bonus_signals,
         category_keys=category_keys,
-        categories=[cat.model_dump() for cat in rubric.categories],
+        categories=category_dicts,
+        default_bands=(shared or {}).get("default_bands"),
         text_content="{{ text_content }}",
     )
     system_message = render_template(
@@ -359,6 +390,42 @@ class GateResult:
         return not self.hard and not self.soft
 
 
+def _anchor_lint(rubric: RubricSchema, jd_tokens: frozenset[str]) -> list[str]:
+    """Anchor quality lint (upgrade-2 soft checks).
+
+    Soft-only: a lint hit never rejects a rubric outright - it triggers the
+    single targeted repair (or ``gate_miss`` when repair is disabled) so the
+    operator sees the rubric was coarse, not that it was malformed.
+
+    Checks:
+    1. JD grounding - a category's band text must share at least one content
+       token with the JD corpus. Purely generic ladders ("no credible evidence
+       yet / some evidence, gaps remain / clear evidence matching the JD
+       wording") have *zero* JD overlap and deserve a repair pass.
+    2. Cross-category duplication - the exact same ``(min_points, band)`` ladder
+       on 2+ categories is a copy-pasted rubric, not a per-category score grid.
+    3. Binary ladders - exactly two bands at ``{0, max}`` cannot express partial
+       credit and push graders to the mid-band; prefer 3+ bands.
+    """
+    hits: list[str] = []
+    seen: dict[tuple[tuple[int, str], ...], str] = {}
+    for cat in rubric.categories:
+        anchors = list(cat.anchors)
+        band_text = frozenset(token for anchor in anchors for token in _tokens(anchor.band))
+        if not band_text & jd_tokens:
+            hits.append(f"{cat.key}: band text shares no content words with the JD corpus - generic ladder")
+        ladder = tuple((anchor.min_points, _norm(anchor.band)) for anchor in anchors)
+        if not ladder:
+            continue
+        if ladder in seen:
+            hits.append(f"{cat.key} and {seen[ladder]}: identical anchor ladder on both categories - copy-pasted grid")
+        seen[ladder] = cat.key
+        points = [anchor.min_points for anchor in anchors]
+        if len(points) == 2 and points == sorted([0, cat.max]):
+            hits.append(f"{cat.key}: binary 2-band ladder (0/{cat.max}) cannot express partial credit")
+    return hits
+
+
 def validate_partition(rubric: RubricSchema, jd: dict[str, Any]) -> GateResult:
     """The S7-v2 gate: hard grounding (rubric→JD) + soft coverage (JD→rubric).
 
@@ -377,6 +444,9 @@ def validate_partition(rubric: RubricSchema, jd: dict[str, Any]) -> GateResult:
     jd_tokens: frozenset[str] = jd.get("jd_tokens") or frozenset()
     required = list(jd.get("required_skills") or [])
     responsibilities = list(jd.get("responsibilities") or [])
+
+    for hit in _anchor_lint(rubric, jd_tokens):
+        result.soft.append(hit)
 
     if not rubric.derivation.scoreable:
         result.hard.append("derivation.scoreable must list every scoreable signal")

@@ -347,6 +347,81 @@ def test_rubric_generation_templates_two_mode_and_fallback_never_none() -> None:
     assert missing == "inline-fallback-evaluate"
 
 
+def test_eval_criteria_drops_jd_sources_and_dedupes_shared_anchor_ladder() -> None:
+    """Upgrade-1 token cut: jd_sources no longer re-rendered in the eval branch,
+    and an identical anchor ladder across categories renders once as SHARED bands
+    instead of once per category."""
+    role = _role_from(RUBRIC)
+    assert "JD sources this category anchors to" not in role.criteria  # cut
+    per_cat = [c for c in role.categories if c.jd_sources]
+    assert per_cat and all("JD sources this category anchors to" not in role.criteria for _ in per_cat)
+
+    shared = {
+        "position_title": "Backend Engineer",
+        "bonus_max": 0,
+        "bonus_signals": [],
+        "categories": [
+            {
+                "key": "cat_a",
+                "label": "Cat A",
+                "max": 10,
+                "requirement_text": "Own the API",
+                "jd_sources": ["Own the API"],
+                "anchors": [
+                    {"min_points": 0, "band": "no credible evidence"},
+                    {"min_points": 5, "band": "some evidence"},
+                    {"min_points": 10, "band": "clear evidence"},
+                ],
+            },
+            {
+                "key": "cat_b",
+                "label": "Cat B",
+                "max": 10,
+                "requirement_text": "Ship the UI",
+                "jd_sources": ["Ship the UI"],
+                "anchors": [
+                    {"min_points": 0, "band": "no credible evidence"},
+                    {"min_points": 5, "band": "some evidence"},
+                    {"min_points": 10, "band": "clear evidence"},
+                ],
+            },
+            {
+                "key": "cat_c",
+                "label": "Cat C",
+                "max": 10,
+                "requirement_text": "Run the ops",
+                "jd_sources": ["Run the ops"],
+                "anchors": [
+                    {"min_points": 0, "band": "no credible evidence"},
+                    {"min_points": 5, "band": "some evidence"},
+                    {"min_points": 10, "band": "clear evidence"},
+                ],
+            },
+        ],
+        "derivation": {
+            "scoreable": ["Own the API", "Ship the UI", "Run the ops"],
+            "eligibility": [],
+            "removed": [],
+        },
+    }
+    shared_role = _role_from(shared)
+    assert shared_role.criteria.count("no credible evidence") == 1  # rendered once, not thrice
+    assert "SHARED SCORE BANDS" in shared_role.criteria
+
+    distinct = json.loads(json.dumps(shared))
+    distinct["categories"][1]["anchors"][1]["band"] = "mid evidence with real gaps"
+    distinct_role = _role_from(distinct)
+    assert distinct_role.criteria.count("no credible evidence") == 3  # distinct ladders all inline
+    assert "SHARED SCORE BANDS" not in distinct_role.criteria
+
+
+def test_eval_criteria_includes_calibration_example() -> None:
+    """Upgrade-2b: the eval prompt carries a compact band-usage worked example."""
+    role = _role_from(RUBRIC)
+    assert "CALIBRATION EXAMPLE" in role.criteria
+    assert "api_design" in role.criteria and "mentorship" in role.criteria
+
+
 def test_normalize_and_total_math() -> None:
     assert normalize(93, 100) == 93
     assert normalize(70, 120) == 58

@@ -169,3 +169,23 @@ def test_scoring_rubric_repair_env_toggle_pinned() -> None:
         "if not gate.passed and _repair_enabled():",
         where="rubric_generator.py",
     )
+
+
+def test_scoring_anchor_lint_checks_pinned() -> None:
+    """Upgrade-2 anchor lint: soft quality checks must exist on the gate path."""
+    ours = _text(SCORING / "rubric_generator.py")
+    _assert_has(ours, "def _anchor_lint(", where="rubric_generator.py")
+    _assert_has(ours, "band text shares no content words with the JD corpus", where="rubric_generator.py")
+    _assert_has(ours, "identical anchor ladder on both categories", where="rubric_generator.py")
+    _assert_has(ours, "binary 2-band ladder", where="rubric_generator.py")
+    _assert_has(ours, "for hit in _anchor_lint(rubric, jd_tokens):", where="rubric_generator.py")
+
+
+def test_scoring_shared_anchor_dedupe_pinned() -> None:
+    """Upgrade-1 eval token cut: shared-ladder dedupe helper exists."""
+    ours = _text(SCORING / "rubric_generator.py")
+    _assert_has(ours, "def _shared_anchor_bands(categories: list[Any])", where="rubric_generator.py")
+    _assert_has(ours, "custom_bands", where="rubric_generator.py")
+    tpl = _text(ROOT / "backend" / "app" / "core_engine" / "templates" / "rubric_generator_prompt.jinja")
+    _assert_has(tpl, "SHARED SCORE BANDS", where="rubric_generator_prompt.jinja")
+    _assert_has(tpl, "CALIBRATION EXAMPLE", where="rubric_generator_prompt.jinja")

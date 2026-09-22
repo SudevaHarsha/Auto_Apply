@@ -75,17 +75,22 @@ and provide scores based on these criteria:
 **MANDATORY: You MUST always fill ALL categories: {{ category_keys }}.**
 
 ## SCORING CRITERIA (pick each score using the JD-anchored bands)
+{% if default_bands -%}
+## SHARED SCORE BANDS (apply to every category that does not list its own below)
+{% for anchor in default_bands -%}
+- {{ anchor.min_points }} pts: {{ anchor.band }}
+{% endfor %}
+{% endif %}
 {% for cat in categories -%}
 ### {{ cat.label }} (0-{{ cat.max }} points)
 {% if cat.requirement_text -%}
 - JD requirement this category scores: {{ cat.requirement_text }}
 {% endif %}
-{% if cat.jd_sources -%}
-- JD sources this category anchors to: {{ cat.jd_sources | join("; ") }}
-{% endif %}
+{% if cat.custom_bands -%}
 {% for anchor in cat.anchors or [] -%}
 - {{ anchor.min_points }} pts: {{ anchor.band }}
 {% endfor %}
+{% endif %}
 {% endfor %}
 ## BONUS POINTS (Maximum total: {{ bonus_max }} points)
 {% if bonus_signals -%}
@@ -119,6 +124,17 @@ and provide scores based on these criteria:
     "key_strengths": ["strength1", "strength2"],
     "areas_for_improvement": ["improvement1"]
 }
+
+## CALIBRATION EXAMPLE (illustrative — never copy its text as this resume's evidence)
+This is a WORKED EXAMPLE of band usage for a generic role. It is NOT the resume
+you are scoring. Use it only to calibrate how strictly to apply 0..max per band.
+
+Example role: "Backend Engineer (illustrative)". A candidate with a real shipped
+API, no mentoring duties and no open source scored:
+- api_design (max 10): 8 — band "solid shipped API evidence"
+- collaboration (max 10): 3 — band "some evidence, clear gaps remain"
+- mentorship (max 10): 0 — band "no evidence at all"
+Use the full 0..max range; a category max is rarely the score for partial evidence.
 
 Resume to evaluate:
 
