@@ -38,6 +38,7 @@ class MockProviderAdapter:
         api_key: str | None = None,
         json_mode: bool = False,
         output_schema: dict[str, Any] | None = None,
+        max_output_tokens: int | None = None,
         timeout: float = 20.0,
     ) -> ChatResponse:
         if self._log is not None:
@@ -51,6 +52,7 @@ class MockProviderAdapter:
                     "api_key": api_key,
                     "json_mode": json_mode,
                     "output_schema": output_schema,
+                    "max_output_tokens": max_output_tokens,
                 }
             )
         if self.scheduled:
@@ -102,3 +104,16 @@ def unavailable(error_type: str = "model_loading", *, latency: int = 2) -> ChatR
 
 def invalid_key(latency: int = 2) -> ChatResponse:
     return ChatResponse(status="http_error", status_code=401, error_type="invalid_key", latency_ms=latency)
+
+
+def truncated(content: str = "partial", *, model: str = "m-model", ct: int = 6000, latency: int = 5) -> ChatResponse:
+    """A completion that hit its ``max_output_tokens`` ceiling (4.3, D3)."""
+    return ChatResponse(
+        status="ok",
+        content=content,
+        model=model,
+        prompt_tokens=10,
+        completion_tokens=ct,
+        latency_ms=latency,
+        truncated=True,
+    )

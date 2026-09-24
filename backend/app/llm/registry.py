@@ -30,12 +30,13 @@ class ProviderSpec:
     adapter: type[ProviderAdapter]
     default_base_url: str
     default_model: str
+    tpm: int | None = None
 
 
 REGISTRY: dict[str, ProviderSpec] = {
     "gemini": ProviderSpec(GeminiAdapter, "https://generativelanguage.googleapis.com", "gemini-3.6-flash"),
     "ollama": ProviderSpec(OllamaAdapter, "http://localhost:11434", "llama3"),
-    "groq": ProviderSpec(OpenAICompatibleAdapter, "https://api.groq.com/openai/v1", "openai/gpt-oss-20b"),
+    "groq": ProviderSpec(OpenAICompatibleAdapter, "https://api.groq.com/openai/v1", "openai/gpt-oss-20b", tpm=8000),
     "openrouter": ProviderSpec(OpenAICompatibleAdapter, "https://openrouter.ai/api/v1", "qwen/qwen3.8-27b:free"),
 }
 

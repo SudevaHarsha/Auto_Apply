@@ -41,6 +41,7 @@ from backend.app.llm.adapters.base import ProviderAdapter
 from backend.app.llm.crypto import DecryptionError, decrypt_provider_key
 from backend.app.llm.errors import ProvidersExhaustedError
 from backend.app.llm.json_utils import parse_llm_json
+from backend.app.llm.limits import budget_expected, count_prompt_tokens
 from backend.app.llm.registry import is_registered, spec_for
 
 TRIP_THRESHOLD = 3
@@ -59,6 +60,7 @@ class LLMResponse:
     prompt_tokens: int
     completion_tokens: int
     latency_ms: int
+    truncated: bool = False
 
 
 def cooldown_for_retry_after(retry_after: float | None, provider_name: str, now: datetime) -> datetime:
@@ -254,6 +256,7 @@ async def route_llm_request(
     step: str | None = None,
     json_mode: bool = False,
     output_schema: dict[str, Any] | None = None,
+    max_output_tokens: int | None = None,
     adapter_factory: Callable[[str], ProviderAdapter] | None = None,
     now: datetime | None = None,
 ) -> LLMResponse:
@@ -288,6 +291,27 @@ async def route_llm_request(
                     }
                 )
                 continue
+            spec = spec_for(name)
+            budget = (
+                budget_expected(count_prompt_tokens(prompt, system_message), max_output_tokens)
+                if max_output_tokens is not None
+                else None
+            )
+            tpm = spec.tpm if spec is not None else None
+            budget_exceeded = budget is not None and tpm is not None and budget > tpm
+            if budget_exceeded:
+                attempts.append(
+                    {
+                        "provider": name,
+                        "status": "budget_skip",
+                        "error_type": "budget_skip",
+                        "called": False,
+                        "skipped_by_budget": True,
+                        "budget_expected": budget,
+                        "provider_tpm": tpm,
+                    }
+                )
+                continue
             api_key: str | None = None
             if row.get("api_key_encrypted"):
                 try:
@@ -315,6 +339,7 @@ async def route_llm_request(
                 api_key=api_key,
                 json_mode=json_mode,
                 output_schema=output_schema,
+                max_output_tokens=max_output_tokens,
                 timeout=DEFAULT_TIMEOUT_SECONDS,
             )
             consumed.append(name)
@@ -337,6 +362,7 @@ async def route_llm_request(
                     prompt_tokens=response.prompt_tokens,
                     completion_tokens=response.completion_tokens,
                     latency_ms=response.latency_ms,
+                    truncated=response.truncated,
                 )
             error_type = response.error_type or ("timeout" if response.status == "timeout" else "server_error")
             if response.status == "unavailable":
@@ -414,6 +440,7 @@ async def generate_structured(
     job_id: uuid.UUID | None = None,
     step: str | None = None,
     max_repairs: int = 1,
+    max_output_tokens: int | None = None,
     adapter_factory: Callable[[str], ProviderAdapter] | None = None,
     now: datetime | None = None,
 ) -> Any:
@@ -456,6 +483,27 @@ async def generate_structured(
                     }
                 )
                 continue
+            spec = spec_for(name)
+            budget = (
+                budget_expected(count_prompt_tokens(prompt, system_message), max_output_tokens)
+                if max_output_tokens is not None
+                else None
+            )
+            tpm = spec.tpm if spec is not None else None
+            budget_exceeded = budget is not None and tpm is not None and budget > tpm
+            if budget_exceeded:
+                attempts.append(
+                    {
+                        "provider": name,
+                        "status": "budget_skip",
+                        "error_type": "budget_skip",
+                        "called": False,
+                        "skipped_by_budget": True,
+                        "budget_expected": budget,
+                        "provider_tpm": tpm,
+                    }
+                )
+                continue
             if row.get("api_key_encrypted"):
                 try:
                     api_key = await _try_decrypt_key(row)
@@ -489,6 +537,7 @@ async def generate_structured(
                     api_key=api_key,
                     json_mode=True,
                     output_schema=schema,
+                    max_output_tokens=max_output_tokens,
                     timeout=DEFAULT_TIMEOUT_SECONDS,
                 )
                 if response.status == "ok":

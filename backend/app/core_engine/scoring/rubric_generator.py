@@ -52,6 +52,7 @@ from backend.app.core_engine.errors import RubricGenerationFailedError
 from backend.app.core_engine.jd_schema import StructuredJD
 from backend.app.core_engine.json_utils import extract_json_from_response
 from backend.app.llm.errors import ProvidersExhaustedError
+from backend.app.llm.limits import estimate_rubric_cap
 from backend.app.llm.router import route_llm_request
 
 from .role import Category, RoleDefinition
@@ -696,6 +697,7 @@ async def generate_rubric(
     accepted-with-flag (``role_def.gate_miss``).
     """
     jd = jd_input(jd_payload)
+    max_output_tokens = estimate_rubric_cap(jd)
     base_prompt = render_template(
         "rubric_generator_prompt.jinja",
         fallback=_RUBRIC_PROMPT_FALLBACK,
@@ -721,6 +723,7 @@ async def generate_rubric(
             system_message=system_message,
             json_mode=True,
             output_schema=RubricSchema.model_json_schema(),
+            max_output_tokens=max_output_tokens,
             job_id=job_id,
             step="rubric_generation",
             adapter_factory=adapter_factory,
@@ -748,6 +751,18 @@ async def generate_rubric(
             details={"cause": type(exc).__name__},
         ) from exc
 
+    if response.truncated:
+        raise RubricGenerationFailedError(
+            "rubric generation output hit its max_output_tokens ceiling",
+            details={
+                "error_type": "output_truncated",
+                "can_continue": True,
+                "max_output_tokens": max_output_tokens,
+                "completion_tokens": response.completion_tokens,
+                "content_prefix": (response.content or "")[:200],
+            },
+        )
+
     rubric = _coerce_rubric(response, jd=jd)
     gate = validate_partition(rubric, jd)
     if not gate.passed and _repair_enabled():
@@ -772,6 +787,17 @@ async def generate_rubric(
                 "rubric generation repair exhausted every configured provider",
                 details={"cause": type(exc).__name__},
             ) from exc
+        if response.truncated:
+            raise RubricGenerationFailedError(
+                "rubric generation repair output hit its max_output_tokens ceiling",
+                details={
+                    "error_type": "output_truncated",
+                    "can_continue": True,
+                    "max_output_tokens": max_output_tokens,
+                    "completion_tokens": response.completion_tokens,
+                    "content_prefix": (response.content or "")[:200],
+                },
+            )
         rubric = _coerce_rubric(response, jd=jd)
         gate = validate_partition(rubric, jd)
     if gate.hard:

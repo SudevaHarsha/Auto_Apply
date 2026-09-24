@@ -11,7 +11,6 @@ from backend.app.llm.adapters.base import ChatResponse
 from backend.app.llm.schema_dialects import openai_compatible_schema
 
 OUTPUT_SCHEMA_NAME = "structured_output"
-MAX_SCHEMA_OUTPUT_TOKENS = 16384
 _CHAT_COMPLETIONS = "/chat/completions"
 
 
@@ -53,6 +52,7 @@ class OpenAICompatibleAdapter:
         api_key: str | None = None,
         json_mode: bool = False,
         output_schema: dict[str, Any] | None = None,
+        max_output_tokens: int | None = None,
         timeout: float = 20.0,
     ) -> ChatResponse:
         url = _endpoint_url(base_url)
@@ -71,9 +71,10 @@ class OpenAICompatibleAdapter:
                         "schema": openai_compatible_schema(output_schema),
                     },
                 }
-                body["max_tokens"] = MAX_SCHEMA_OUTPUT_TOKENS
             else:
                 body["response_format"] = {"type": "json_object"}
+        if max_output_tokens is not None:
+            body["max_tokens"] = max_output_tokens
         headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
         started = time.monotonic()
         try:
@@ -94,13 +95,18 @@ class OpenAICompatibleAdapter:
             try:
                 data = resp.json()
                 content = None
+                truncated = False
                 for choice in data.get("choices") or []:
                     content = (choice.get("message") or {}).get("content")
+                    if choice.get("finish_reason") == "length":
+                        truncated = True
                     if content:
                         break
                 usage = data.get("usage") or {}
                 prompt_tokens = int(usage.get("prompt_tokens") or 0)
                 completion_tokens = int(usage.get("completion_tokens") or 0)
+                if not truncated and max_output_tokens is not None and completion_tokens >= max_output_tokens:
+                    truncated = True
             except (TypeError, ValueError):
                 return ChatResponse(
                     status="http_error",
@@ -115,6 +121,7 @@ class OpenAICompatibleAdapter:
                 prompt_tokens=prompt_tokens,
                 completion_tokens=completion_tokens,
                 latency_ms=latency_ms,
+                truncated=truncated,
             )
         if resp.status_code == 429:
             return ChatResponse(

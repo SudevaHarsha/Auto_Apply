@@ -20,6 +20,7 @@ from pydantic import BaseModel
 from backend.app.core_engine.errors import ScoringFailedError
 from backend.app.core_engine.json_utils import extract_json_from_response
 from backend.app.core_engine.template_manager import TemplateManager
+from backend.app.llm.limits import count_prompt_tokens, estimate_eval_cap
 from backend.app.llm.router import LLMResponse, route_llm_request
 
 from .role import RoleDefinition
@@ -76,6 +77,7 @@ class ResumeEvaluator:
         try:
             full_prompt = self._load_evaluation_prompt(resume_text)
             system_message = self.template_manager.render_string(self.role.system_message)
+            max_output_tokens = estimate_eval_cap(resume_tokens=count_prompt_tokens(resume_text))
             response = await route_llm_request(
                 conn,
                 user_id=user_id,
@@ -83,6 +85,7 @@ class ResumeEvaluator:
                 system_message=system_message,
                 json_mode=True,
                 output_schema=self.evaluation_model.model_json_schema(),
+                max_output_tokens=max_output_tokens,
                 job_id=job_id,
                 step="scoring",
                 adapter_factory=adapter_factory,
@@ -94,6 +97,17 @@ class ResumeEvaluator:
             ) from exc
 
         self.last_response = response
+
+        if response.truncated:
+            raise ScoringFailedError(
+                "evaluation output hit its max_output_tokens ceiling",
+                details={
+                    "cause": "output_truncated",
+                    "max_output_tokens": max_output_tokens,
+                    "completion_tokens": response.completion_tokens,
+                    "content_prefix": (response.content or "")[:200],
+                },
+            )
 
         try:
             response_text = extract_json_from_response(response.content or "")

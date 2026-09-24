@@ -1,6 +1,7 @@
 # Rubric Generation — Token Cost Analysis
 
-Status: **investigation notes** (unimplemented, unmeasured — estimates, not facts).
+Status: **implemented + verified** (token-cost levers 4.1/4.2/4.3 landed and green;
+live measurements recorded 2026-09-22 →  09-24).
 Accompanying doc: `rubric_generator.md`. Live-test context recorded week of 2026-09-22.
 
 ---
@@ -19,6 +20,8 @@ generation call runs ~8.0k total, so it alone consumes the entire window — eve
 subsequent call in the same minute 429s. This is what blocks the live test
 `test_live_second_score_hits_rubric_cache` (fresh score + cache-hit re-score).
 The blocker is a **quota + completion-size problem combined**, not a code fault.
+(4.3's D2c budget gating now prevents the wasted call: rubric 2,421 + 6,000 cap
+= 8,421 > 8k, so groq is skipped and generation routes to gemini.)
 
 Completion (~5.8k) is ~2.7× the prompt (~2.1k). **Completion is the cost driver.**
 
@@ -234,10 +237,53 @@ presence); suite green (35 total).
   guard pins the same rules and proves distinct maxes (35/20/5) reach the eval
   criteria. Suite green.
 
-### 4.3 Cap `max_tokens` lower
-- `openai_compatible.py:74` sets `max_tokens=16384` — effectively no ceiling
-  pressure. A cap like **4000** forces compaction. Validation is the guard.
-  Small change, immediate, but a truncation edge case must be handled.
+### 4.3 JD-aware output cap = `max(6000, math)` — IMPLEMENTED 2026-09-24
+Previously `openai_compatible.py:74` hardcoded `max_tokens=16384` (no ceiling
+pressure at all). It's removed. The cap is now computed per call, floor of 6000,
+and the math can only ever RAISE it — never lower it below the base. Implemented
+end-to-end in 4.3 (D1-D4):
+
+- **D2 estimator** — `backend/app/llm/limits.py`:
+  - rubric: `cap = max(6000, echo_pool + 150 + allowance_rubric)` where
+    `echo_pool` = tiktoken count of **every responsibility + every required
+    skill** (the responsibilities driver: more responsibilities -> larger pool ->
+    higher cap) and `allowance_rubric = 3500` (`LLM_RUBRIC_ALLOWANCE`).
+  - eval: `cap = max(6000, 400 + allowance_eval + resume_tokens // 4)` with
+    `allowance_eval = 5000` (`LLM_EVAL_ALLOWANCE`) — a long resume grows the
+    completion budget, since eval echoes resume evidence.
+  - env overrides (`LLM_MAX_OUTPUT_TOKENS_RUBRIC`/`_EVAL`) only raise further.
+- **D2a exact input count** — the actually-rendered prompt + system message are
+  token-counted via tiktoken cl100k_base before routing (char/4 is only the
+  no-tiktoken fallback). Live pins: rubric prompt 2,421; eval prompt 2,310
+  (char/4 would undercount by ~24%).
+- **D2c budget gating in `route_llm_request`/`generate_structured`** —
+  `budget_expected = prompt_tokens + cap` is checked against each provider's
+  declared `tpm` (`ProviderSpec.tpm`, registry; groq = 8000 measured). A provider
+  that cannot fit the expected call in its minute window is `budget_skip`-ped
+  BEFORE any call — no usage row, no breaker trip, recorded in `attempts`. All
+  under-cap -> `ProvidersExhaustedError` (fail-soft). Ground truth: rubric
+  2,421 + 6,000 = 8,421 > 8k groq, so **rubric generation must route to gemini**
+  (this is the 4.4 routing requirement, now math-enforced not config-only);
+  eval 2,310 + 6,000 = 6,828 fits.
+- **D1/D3 adapter caps + truncation detection** — every adapter carries the
+  computed cap on the wire (`max_tokens` openai-compatible / `maxOutputTokens`
+  gemini / `num_predict` ollama, only when the caller passes one) and flags
+  truncation honestly instead of guessing: `finish_reason == "length"` or
+  `usage.completion_tokens >= max_output_tokens`, `finishReason == "MAX_TOKENS"`,
+  `done_reason == "length"`. `ChatResponse.truncated` + `LLMResponse.truncated`
+  flow back to the consumer.
+- **D4 consumer honesty (no silent repair)** — `generate_rubric` /
+  `evaluate_resume` check `response.truncated` BEFORE any JSON coercion and raise
+  `RubricGenerationFailedError` / `ScoringFailedError` with
+  `error_type="output_truncated"`, `can_continue=True`, the applied cap, the
+  completion count, and a `content_prefix` — so the interactive lane can
+  park-and-ask (Continue/Shorten/Fail against a `checkpoints` row) and batch
+  lanes fail fast. Truncated output NEVER reaches `_repair_truncated`
+  (`output_truncated` block precedes every `_coerce_rubric`/parse call).
+
+Per-call effect (jd_1): rubric cap stays at the 6000 base (the small JD's
+calculation ~3,724 < base); a synthetic 2,500-token responsibility pool raises
+it to 6,150. Eval cap is 6000 for common resumes and grows with long ones.
 
 ### 4.4 Route generation to a high-quota provider
 - 8k TPM groq is too small for an ~8k call. Route `rubric_generation` to gemini
