@@ -14,6 +14,8 @@ pinned separately (they are intentional, not drift):
   (C1 → opaque penalties replaced by ``critical_gaps``/``eligibility``);
   ``scorer.py`` drops ``total -= evaluation.deductions.total`` from the math
   (S7-v2 §10, Fix 4/C1).
+* ``rubric_generator_*.jinja`` carry the 4.2 hardening — band word cap +
+  JD-emphasis weighting — pinned via ``test_scoring_4_2_prompt_rules_and_weight_flow``.
 
 Math skeleton pinned semantically (``_total_math`` re-structured but identical
 expressions); evaluation schemas pinned line-verbatim (``Type``→``type`` alias
@@ -189,3 +191,67 @@ def test_scoring_shared_anchor_dedupe_pinned() -> None:
     tpl = _text(ROOT / "backend" / "app" / "core_engine" / "templates" / "rubric_generator_prompt.jinja")
     _assert_has(tpl, "SHARED SCORE BANDS", where="rubric_generator_prompt.jinja")
     _assert_has(tpl, "CALIBRATION EXAMPLE", where="rubric_generator_prompt.jinja")
+
+
+def test_scoring_4_2_prompt_rules_and_weight_flow() -> None:
+    """4.2 prompt hardening pinned: band cap + JD-emphasis weighting.
+
+    Generate templates must carry the band rule (≤8 words, JD-grounded,
+    observable resume evidence, top band = category max) and the weighting rule
+    (never infer importance from generic industry expectations). And the eval
+    render must let distinct category maxes reach the scorer, so the JD-emphasis
+    weights actually change scores rather than sit unused in the rubric.
+    """
+    import sys
+
+    sys.path.insert(0, str(ROOT / "backend"))  # guards run without backend/ on sys.path
+    from app.core_engine.scoring.rubric_generator import build_role_definition
+    from app.core_engine.scoring.schemas import RubricAnchor, RubricFacet, RubricSchema
+
+    tpl = _text(ROOT / "backend" / "app" / "core_engine" / "templates" / "rubric_generator_prompt.jinja")
+    sys_tpl = _text(ROOT / "backend" / "app" / "core_engine" / "templates" / "rubric_generator_system.jinja")
+    _assert_has(tpl, "top band equals category max", where="rubric_generator_prompt.jinja")
+    _assert_has(tpl, "describes observable resume evidence", where="rubric_generator_prompt.jinja")
+    _assert_has(tpl, "infer importance from generic", where="rubric_generator_prompt.jinja")
+    _assert_has(sys_tpl, "Scale max by the JD's own relative emphasis", where="rubric_generator_system.jinja")
+
+    rubric = RubricSchema(
+        position_title="Backend Engineer",
+        bonus_max=10,
+        categories=[
+            RubricFacet(
+                key="backend_depth",
+                label="Backend Depth",
+                max=35,
+                anchors=[
+                    RubricAnchor(min_points=0, band="shipped Go services"),
+                    RubricAnchor(min_points=35, band="owns production Go systems"),
+                ],
+                jd_sources=["responsibilities[0]"],
+            ),
+            RubricFacet(
+                key="cloud_ops",
+                label="Cloud Ops",
+                max=20,
+                anchors=[
+                    RubricAnchor(min_points=0, band="no AWS experience"),
+                    RubricAnchor(min_points=20, band="runs AWS in production"),
+                ],
+                jd_sources=["responsibilities[1]"],
+            ),
+            RubricFacet(
+                key="documentation",
+                label="Documentation",
+                max=5,
+                anchors=[
+                    RubricAnchor(min_points=0, band="no docs written"),
+                    RubricAnchor(min_points=5, band="maintains team docs"),
+                ],
+                jd_sources=["responsibilities[2]"],
+            ),
+        ],
+    )
+    role_def = build_role_definition(rubric, name="test")
+    for expected in ("(0-35 points)", "(0-20 points)", "(0-5 points)"):
+        _assert_has(role_def.criteria, expected, where="eval criteria")
+    assert role_def.criteria.count("(0-35 points)") == 1

@@ -562,6 +562,10 @@ async def test_scoring_call_shapes_json_mode_and_schema() -> None:
         assert "TITLE: Senior Backend Engineer" in calls[0]["prompt"]
         assert "JOB POSTING" in calls[0]["prompt"]
         assert "skills.required[0] Python" in calls[0]["prompt"]
+        # 4.2a: band cap + grounding; 4.2c: weight by JD emphasis (skeleton shows max 30)
+        assert "top band equals category max" in calls[0]["prompt"]
+        assert "infer importance from generic industry expectations" in calls[0]["prompt"]
+        assert '"max": 30' in calls[0]["prompt"]
     finally:
         await conn.close()
 

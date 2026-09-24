@@ -207,12 +207,32 @@ Measured on `tests/live/chain/jd_1.json`: old pair = 2,646 (json) + 2,738 (index
 cut. Tests updated (pointer asserts + `JOB POSTING` header, `skills.required[0]`
 presence); suite green (35 total).
 
-### 4.2 Curb output verbosity (moderate, ~15–25%)
-- Shorten anchor band labels ("under 8 words"). Bands are model-written and also
-  re-rendered into the eval prompt (`_shared_anchor_bands`), so terser bands
-  shrink BOTH the generate call and every later eval call (downstream compounding).
-- Cut gen-prompt prose in the template; pydantic `output_schema` already enforces
-  structure.
+### 4.2 Curb output verbosity (moderate, ~15–25%) — IMPLEMENTED 2026-09-26
+- **4.2a band cap:** anchor rule now reads "each band ≤ 8 words in total,
+  includes a signal from THIS JD, and describes observable resume evidence;
+  min_points strictly ascend from 0; top band equals category max". The JD-term
+  requirement keeps the `_anchor_lint` grounding overlap intact (terse generic
+  bands would hit the generic-ladder soft hit and cost a repair); "top band
+  equals category max" removes the un-anchored score zone (top < max) and forces
+  weight↔ladder coherence. Mirrored in the system template.
+- **4.2b prose trim:** generate-prompt bridge condensed to `Rules:`; eligibility
+  examples shortened; the fairness bullet deleted from the prompt (already
+  present, unchanged, in the system template). Frees ~150-225 prompt tokens.
+- **4.2c weight by JD emphasis:** Guidelines now require assigning each
+  category's max by the JD's relative emphasis — core responsibilities and
+  explicitly-required skills outrank secondary signals, explicitly **never from
+  generic industry expectations** (occupational stereotypes). Skeleton example
+  now shows a `max: 30` / 0-15-30 category to teach non-uniform weights.
+  Bonus: distinct maxes → distinct anchor grids → fewer copy-pasted-grid lint
+  hits → fewer repairs. No Python change; weights were already honored by the
+  scorer (eval renders `0-{{ cat.max }}`).
+- Prompt rules are prompt-soft on purpose: `validate_partition` still accepts
+  `top < max` and any weight spread (legacy cache back-compat + grading freedom).
+  Downside accepted: distinct maxes mean `_shared_anchor_bands` rarely fires, so
+  eval renders ladders inline — bounded by the 8-word cap.
+- Tests: integration asserts band/weight rule strings + skeleton `"max": 30`;
+  guard pins the same rules and proves distinct maxes (35/20/5) reach the eval
+  criteria. Suite green.
 
 ### 4.3 Cap `max_tokens` lower
 - `openai_compatible.py:74` sets `max_tokens=16384` — effectively no ceiling

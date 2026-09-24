@@ -20,12 +20,12 @@ this shape:
     {
       "key": "snake_case_key_1",
       "label": "Human Label 1",
-      "max": 20,
+      "max": 30,
       "icon": "•",
       "anchors": [
         {"min_points": 0, "band": "no credible evidence of this yet"},
-        {"min_points": 10, "band": "some evidence, gaps remain"},
-        {"min_points": 20, "band": "clear evidence matching the JD wording"}
+        {"min_points": 15, "band": "some evidence, gaps remain"},
+        {"min_points": 30, "band": "clear evidence matching the JD wording"}
       ],
       "jd_sources": ["<a `key[i]` pointer from the JOB POSTING listing above, e.g. responsibilities[0]>"],
     }
@@ -41,15 +41,14 @@ this shape:
   }
 }
 
-Score-level anchors and the partition trail are the points of the whole rubric,
-so the rules matter:
+Rules:
 
 STEP 1 - Partition every signal you can extract from the JD:
 - Requirements with a floor (skills, years of experience, degree, certifications)
   -> category.jd_sources and derivation.scoreable. NEVER leave a stated required
   skill or responsibility out of the scoreable set.
-- Schedule / shift / work-location / office-policy requirements (for example
-  "camera on", "on-site", "work in Kandivali", "24x7 shifts", "hybrid") are
+- Schedule / shift / work-location / office-policy requirements (e.g. "on-site",
+  "hybrid", shift/location/office policy) are
   ELIGIBILITY, not scoreable. Do exactly that even when they appear under
   "responsibilities". They are never scored and never penalize category scores.
 - Genuine noise that the JD does not state at all -> derivation.removed with a
@@ -59,17 +58,19 @@ STEP 2 - Ground everything in the JD wording:
 - jd_sources entries MUST be `key[i]` pointers from the JOB POSTING listing above
   (no retyping, no paraphrasing); scoreable may list each signal as a short name
   (the full phrase lives in that category's jd_sources).
-- Anchors: 2-5 bands per category, strictly ascending min_points starting at 0,
-  top band at most the category max. Anchors describe resume evidence, never
-  custom vocabulary.
+- Anchors: 2-5 bands per category; each band ≤ 8 words in total, includes a signal
+  from THIS JD, and describes observable resume evidence; min_points strictly
+  ascend from 0; top band equals category max. Bands describe resume evidence,
+  never custom vocabulary.
 - Do NOT use client/customer/stakeholder or production/ops/incident/uptime
   language in any band unless the payload above actually contains those words.
 
 Guidelines:
-- 3-5 categories; weights should not all be identical; sum of all max values
-  should land between 10 and 100. bonus_max must be an integer between 0 and 20.
-- Category weights must never depend on a candidate's name, gender, institution,
-  or location.
+- 3-5 categories; assign each category's max according to the JD's relative emphasis
+  and importance (core + explicitly-required skills outrank secondary supporting
+  signals). Never infer importance from generic industry expectations.
+  Sum of maxes 10-100; identical maxes only when the JD provides roughly equal
+  emphasis; bonus_max integer 0-20.
 {%- else -%}
 You are evaluating a resume for the {{ position_title }}. Analyze the resume data
 and provide scores based on these criteria:
