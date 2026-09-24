@@ -66,8 +66,8 @@ _RUBRIC_PROMPT_FALLBACK = """You are building a scoring rubric. Respond with ONL
 top-level JSON object named "rubric":
 
 TITLE: {{ title }}
-ENTIRE STRUCTURED JD PAYLOAD:
-{{ jd_json }}
+JOB POSTING listing:
+{{ jd_index or jd_json }}
 
 {% if mode == "evaluate" %}Evaluate the resume for the {{ position_title }}.
 
@@ -126,10 +126,44 @@ def jd_input(payload: dict[str, Any]) -> dict[str, Any]:
     return {
         "title": title,
         "jd_json": jd_json,
+        "jd_body": body,
+        "jd_index": _render_indexed_jd(body),
         "required_skills": required,
         "responsibilities": responsibilities,
         "jd_tokens": frozenset(_tokens(jd_json)),
     }
+
+
+def _render_indexed_jd(body: dict[str, Any]) -> str:
+    """Build the single ``key[i]`` pointer cheat-sheet for the generation prompt (4.1-c).
+
+    Renders the *whole* JD exactly once: every array string as ``key.subkey[i]`` /
+    ``key[i]`` with visible indices (so the model copies an index instead of
+    counting — index off-by-one is the main failure mode this prevents), and every
+    scalar leaf (including location/remote_policy/sponsorship/etc.) as
+    ``key: value``. This replaces the pre-4.1-c pair of full-JD JSON + separate
+    INDEXED REFERENCE block: a single copy guarantees the partition step still sees
+    scalars AND kills the duplicated array strings (~700 tokens on the live JD).
+    """
+    lines: list[str] = []
+
+    def _walk(section: Any, prefix: str) -> None:
+        if isinstance(section, list):
+            for i, item in enumerate(section):
+                if isinstance(item, str):
+                    lines.append(f"{prefix}[{i}] {item}")
+            return
+        if isinstance(section, dict):
+            for key, value in section.items():
+                _walk(value, f"{prefix}.{key}" if prefix else key)
+            return
+        if prefix:
+            lines.append(f"{prefix}: {section}")
+
+    _walk(body, "")
+    if not lines:
+        return ""
+    return "INDEXED JOB POSTING — every line below is addressable; arrays use `key[i]`:\n" + "\n".join(lines)
 
 
 def rubric_sha256(rubric: dict[str, Any]) -> str:
@@ -151,7 +185,6 @@ def persist_envelope(role_def: RoleDefinition) -> dict[str, Any]:
                 "icon": cat.icon,
                 "anchors": list(cat.anchors),
                 "jd_sources": list(cat.jd_sources),
-                "requirement_text": cat.requirement_text,
             }
             for cat in role_def.categories
         ],
@@ -196,7 +229,6 @@ def build_role_definition(rubric: RubricSchema, *, name: str) -> RoleDefinition:
             icon=cat.icon or "•",
             anchors=[anchor.model_dump() for anchor in cat.anchors],
             jd_sources=list(cat.jd_sources),
-            requirement_text=cat.requirement_text,
         )
         for cat in rubric.categories
     ]
@@ -258,7 +290,6 @@ def rebuild_role_definition(data: dict[str, Any]) -> RoleDefinition:
                 icon=cat.icon or "•",
                 anchors=[anchor.model_dump() for anchor in cat.anchors],
                 jd_sources=list(cat.jd_sources),
-                requirement_text=cat.requirement_text,
             )
             for cat in rubric.categories
         ],
@@ -414,6 +445,12 @@ def _anchor_lint(rubric: RubricSchema, jd_tokens: frozenset[str]) -> list[str]:
         band_text = frozenset(token for anchor in anchors for token in _tokens(anchor.band))
         if not band_text & jd_tokens:
             hits.append(f"{cat.key}: band text shares no content words with the JD corpus - generic ladder")
+        for source in cat.jd_sources:
+            source_tokens = _tokens(source)
+            if source_tokens and not (source_tokens & jd_tokens):
+                hits.append(
+                    f"{cat.key}: jd_sources {source!r} resolves to text not in the JD corpus - misgrounded pointer"
+                )
         ladder = tuple((anchor.min_points, _norm(anchor.band)) for anchor in anchors)
         if not ladder:
             continue
@@ -435,7 +472,7 @@ def validate_partition(rubric: RubricSchema, jd: dict[str, Any]) -> GateResult:
     A grounding failure after the single targeted repair REJECTS the rubric.
 
     Soft (coverage, §10.4B): every required skill and responsibility is assigned
-    to a category (scoreable/requirement_text/jd_sources/anchors) or to
+    to a category (scoreable/jd_sources/anchors) or to
     eligibility — matched by normalized content-token overlap, so exact echo is
     not required (D70: extractor pollution to eligibility passes). A coverage
     failure after the repair accepts-with-flag (``gate_miss``).
@@ -492,17 +529,10 @@ def validate_partition(rubric: RubricSchema, jd: dict[str, Any]) -> GateResult:
                 )
 
     anchor_text = " ".join(anchor.band for cat in rubric.categories for anchor in cat.anchors)
-    requirement_text = " ".join(cat.requirement_text for cat in rubric.categories)
     jd_sources_text = " ".join(source for cat in rubric.categories for source in cat.jd_sources)
     category_labels = " ".join(cat.label for cat in rubric.categories)
     scoreable_text = " ".join(rubric.derivation.scoreable)
-    rubric_tokens = (
-        _tokens(requirement_text)
-        | _tokens(anchor_text)
-        | _tokens(jd_sources_text)
-        | _tokens(category_labels)
-        | _tokens(scoreable_text)
-    )
+    rubric_tokens = _tokens(anchor_text) | _tokens(jd_sources_text) | _tokens(category_labels) | _tokens(scoreable_text)
     eligibility_tokens = _tokens(" ".join(rubric.derivation.eligibility))
     assignment_tokens = rubric_tokens | eligibility_tokens
 
@@ -552,10 +582,75 @@ def _repair_suffix(gate: GateResult) -> str:
     return "\n\n" + "\n".join(parts)
 
 
-def _coerce_rubric(response: Any) -> RubricSchema:
-    """Parse + strictly validate a rubric-generation response (D49/D55-style)."""
+_POINTER_RE = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*)\[(\d+)\]$")
+
+
+def _looks_like_pointer(entry: str) -> bool:
+    return _POINTER_RE.match(entry.strip()) is not None
+
+
+def _resolve_pointer(body: dict[str, Any], pointer: str) -> str | None:
+    """Resolve a ``key[i]`` / ``key.sub[i]`` pointer to its literal payload string.
+
+    Mirrors the indexed reference rendered into the prompt (4.1-b rule 3, same
+    addressable grammar). Returns ``None`` when the path misses or the target is
+    not a string (never returns the raw pointer — an unresolved pointer is a
+    malformed-rubric signal, not a pass-through).
+    """
+    match = _POINTER_RE.match(pointer.strip())
+    if not match:
+        return None
+    parts = [p for p in match.group(1).split(".")]
+    index = int(match.group(2))
+    node: Any = body
+    for part in parts:
+        if not isinstance(node, dict) or part not in node:
+            return None
+        node = node[part]
+    if not isinstance(node, list) or index >= len(node):
+        return None
+    value = node[index]
+    return value if isinstance(value, str) else None
+
+
+def _coerce_rubric(response: Any, *, jd: dict[str, Any]) -> RubricSchema:
+    """Parse + strictly validate a rubric-generation response (D49/D55-style).
+
+    Pointer wire format (4.1-b): every ``jd_sources`` entry is either a literal
+    JD string (legacy/hybrid back-compat) or a ``key[i]`` pointer that is
+    **resolved here, server-side** against the JD body. The gate below never
+    sees pointers — it runs on resolved literal text, unchanged. An unresolved
+    pointer fails the same as malformed output (no silent pass-through).
+    """
     try:
         parsed = json.loads(extract_json_from_response(response.content or ""))
+    except Exception as exc:
+        raise RubricGenerationFailedError(
+            "rubric generation returned malformed or non-schema output",
+            details={"cause": type(exc).__name__, "content_prefix": (response.content or "")[:200]},
+        ) from exc
+
+    body = jd.get("jd_body") or {}
+    if isinstance(parsed, dict):
+        for facet in parsed.get("categories") or []:
+            if not isinstance(facet, dict):
+                continue
+            sources = facet.get("jd_sources") or []
+            resolved: list[str] = []
+            for entry in sources:
+                if isinstance(entry, str) and _looks_like_pointer(entry):
+                    literal = _resolve_pointer(body, entry)
+                    if literal is None:
+                        raise RubricGenerationFailedError(
+                            "rubric generation returned an unresolvable jd_sources pointer",
+                            details={"pointer": entry, "cause": "pointer does not name a string field"},
+                        )
+                    resolved.append(literal)
+                elif isinstance(entry, str):
+                    resolved.append(entry)
+            facet["jd_sources"] = resolved
+
+    try:
         return RubricSchema.model_validate(parsed)
     except Exception as exc:
         raise RubricGenerationFailedError(
@@ -607,6 +702,7 @@ async def generate_rubric(
         mode="generate",
         title=jd["title"],
         jd_json=jd["jd_json"],
+        jd_index=jd["jd_index"],
     )
     system_message = render_template(
         "rubric_generator_system.jinja",
@@ -652,7 +748,7 @@ async def generate_rubric(
             details={"cause": type(exc).__name__},
         ) from exc
 
-    rubric = _coerce_rubric(response)
+    rubric = _coerce_rubric(response, jd=jd)
     gate = validate_partition(rubric, jd)
     if not gate.passed and _repair_enabled():
         try:
@@ -676,7 +772,7 @@ async def generate_rubric(
                 "rubric generation repair exhausted every configured provider",
                 details={"cause": type(exc).__name__},
             ) from exc
-        rubric = _coerce_rubric(response)
+        rubric = _coerce_rubric(response, jd=jd)
         gate = validate_partition(rubric, jd)
     if gate.hard:
         logger.error(

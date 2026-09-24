@@ -5,11 +5,12 @@ rubric for one role. Respond with ONLY the single role.json-shaped JSON.
 Build 3-5 categories that capture the decisive signals for this role. Each
 category has a snake_case key, a human label, a positive integer max weight
 (the category's score ceiling), an icon character, 2-5 ascending score-level
-anchors (0 -> at most the max), literal jd_sources copied verbatim from the
-payload, and an exact requirement_text. Every required skill and responsibility
-must land in the scoreable set; schedule/shift/location/sponsorship requirements
-are ELIGIBILITY and are never scored. bonus_max must be 0-20. Category weights
-must never depend on a candidate's name, gender, institution, or location.
+anchors (0 -> at most the max), and jd_sources pointing to JD text via
+`key[i]` pointers from the prompt's JOB POSTING listing. Every required skill and
+responsibility must land in the scoreable set; schedule/shift/location/sponsorship
+requirements are ELIGIBILITY and are never scored. bonus_max must be 0-20.
+Category weights must never depend on a candidate's name, gender, institution,
+or location.
 {%- else -%}
 You are an expert technical recruiter evaluating candidates for {{ title }}.
 

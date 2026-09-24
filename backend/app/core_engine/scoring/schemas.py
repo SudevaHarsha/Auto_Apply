@@ -5,10 +5,10 @@
 
 - ``anchors`` (2-5 strictly-ascending bands, 0 → ≤ max) are the score-ladder the
   evaluator applies to each category.
-- ``jd_sources`` are *literal strings copied from the JD payload* that the
-  category anchors to — the grounding hook the S7-v2 gate (B1/Fix 4) verifies.
-- ``requirement_text`` is the exact required-skill/responsibility wording the
-  category scores (soft-coverage target, §10.4B).
+- ``jd_sources`` are *JD references* that anchor the category — either literal
+  strings copied from the JD payload (legacy/hybrid) or ``key[i]`` pointers
+  resolved server-side to literals before validation (4.1-b). The S7-v2 gate
+  (B1/Fix 4) verifies them.
 - ``bonus_signals`` name the role-relevant exceptions worth bonus points.
 - ``derivation`` is the partition trail: ``scoreable`` (every required skill +
   responsibility that counts toward the score), ``eligibility`` (schedule/shift/
@@ -48,8 +48,10 @@ class RubricFacet(BaseModel):
     max: int = Field(gt=0)
     icon: str = "•"
     anchors: list[RubricAnchor] = Field(default_factory=list, description="2-5 ascending score bands, 0 to <= max")
-    jd_sources: list[str] = Field(default_factory=list, description="Literal strings copied from the JD payload")
-    requirement_text: str = Field(default="", description="Exact required-skill wording this category scores")
+    jd_sources: list[str] = Field(
+        default_factory=list,
+        description="JD references: key[i] pointers or literal strings (resolved to literals before the gate)",
+    )
 
 
 class DerivationItem(BaseModel):

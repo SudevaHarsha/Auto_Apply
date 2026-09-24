@@ -84,7 +84,6 @@ RUBRIC = {
             "key": "core_experience",
             "label": "Core Experience",
             "max": 40,
-            "requirement_text": "Own the backend service, design and ship REST APIs",
             "jd_sources": ["Own the backend service"],
             "anchors": [
                 {"min_points": 0, "band": "no backend experience within the 5-8 year range"},
@@ -97,7 +96,6 @@ RUBRIC = {
             "key": "skills_match",
             "label": "Skills Match",
             "max": 30,
-            "requirement_text": "Python, PostgreSQL, Docker and REST APIs",
             "jd_sources": ["Python", "PostgreSQL", "Docker", "REST APIs"],
             "anchors": [
                 {"min_points": 0, "band": "meets none of the required stack"},
@@ -110,7 +108,6 @@ RUBRIC = {
             "key": "leadership",
             "label": "Leadership",
             "max": 20,
-            "requirement_text": "Mentor junior engineers",
             "jd_sources": ["Mentor junior engineers"],
             "anchors": [
                 {"min_points": 0, "band": "no mentoring experience"},
@@ -365,7 +362,6 @@ def test_eval_criteria_drops_jd_sources_and_dedupes_shared_anchor_ladder() -> No
                 "key": "cat_a",
                 "label": "Cat A",
                 "max": 10,
-                "requirement_text": "Own the API",
                 "jd_sources": ["Own the API"],
                 "anchors": [
                     {"min_points": 0, "band": "no credible evidence"},
@@ -377,7 +373,6 @@ def test_eval_criteria_drops_jd_sources_and_dedupes_shared_anchor_ladder() -> No
                 "key": "cat_b",
                 "label": "Cat B",
                 "max": 10,
-                "requirement_text": "Ship the UI",
                 "jd_sources": ["Ship the UI"],
                 "anchors": [
                     {"min_points": 0, "band": "no credible evidence"},
@@ -389,7 +384,6 @@ def test_eval_criteria_drops_jd_sources_and_dedupes_shared_anchor_ladder() -> No
                 "key": "cat_c",
                 "label": "Cat C",
                 "max": 10,
-                "requirement_text": "Run the ops",
                 "jd_sources": ["Run the ops"],
                 "anchors": [
                     {"min_points": 0, "band": "no credible evidence"},
@@ -564,10 +558,10 @@ async def test_scoring_call_shapes_json_mode_and_schema() -> None:
         assert "eligibility" in schema["properties"] and "critical_gaps" in schema["properties"]
         # evaluation prompt carries the resume text (D48)
         assert "Ada Lovelace" in calls[1]["prompt"]
-        # rubric prompt carries the title + the ENTIRE structured JD payload (B1)
+        # rubicon prompt carries the title + a single indexed JOB POSTING listing (B1/4.1-c)
         assert "TITLE: Senior Backend Engineer" in calls[0]["prompt"]
-        assert "ENTIRE STRUCTURED JD PAYLOAD" in calls[0]["prompt"]
-        assert '"required":["Python","PostgreSQL","Docker","REST APIs"]' in calls[0]["prompt"]
+        assert "JOB POSTING" in calls[0]["prompt"]
+        assert "skills.required[0] Python" in calls[0]["prompt"]
     finally:
         await conn.close()
 
@@ -623,6 +617,83 @@ async def test_evaluation_failure_raises_and_rolls_back_including_cache() -> Non
         assert await _evidence_rows(conn, user.id) == []
         assert await _audits(conn, user.id, "job_scored") == []
         assert await _usage_count(conn, user.id, seed["job_id"]) == 0  # usage rows rolled back
+    finally:
+        await conn.close()
+
+
+# ================================================================== 3b — pointer wire format (4.1-b)
+RUBRIC_POINTERS = json.loads(json.dumps(RUBRIC))
+RUBRIC_POINTERS["categories"][0]["jd_sources"] = ["responsibilities[0]"]
+RUBRIC_POINTERS["categories"][1]["jd_sources"] = ["skills.required[0]", "skills.required[1]"]
+RUBRIC_POINTERS["categories"][2]["jd_sources"] = ["responsibilities[2]"]
+
+
+async def test_rubric_pointers_resolve_and_gate_verdict_unchanged() -> None:
+    """jd_sources key[i] pointers resolve server-side to literals before the gate.
+
+    The full path (generate -> resolve -> gate -> eval -> commit) behaves exactly
+    like the literal RUBRIC: 2 calls, clean gate, same score. Proof that 4.1 is a
+    wire-format change, not a semantics change.
+    """
+    conn, user = await _register()
+    try:
+        await _add_provider(conn, user.id)
+        seed = await _seed(conn, user)
+        factory, adapters, _ = scripted_factory(
+            {"gemini": [ok(json.dumps(RUBRIC_POINTERS)), ok(json.dumps(EVAL_HIGH))]}
+        )
+        result = await score_job(conn, user_id=user.id, job_id=seed["job_id"], adapter_factory=factory)
+        assert _call_count(adapters) == 2
+        assert result.normalized == 93
+        assert result.gate_miss is None  # resolved literals pass the same grounding gate
+        assert [f.key for f in result.per_facet] == ["core_experience", "skills_match", "leadership"]
+        assert await _rubric_count(conn, seed["job_id"]) == 1
+
+        calls = adapters["gemini"].calls
+        generation = calls[0]["prompt"]
+        assert "JOB POSTING" in generation  # 4.1-c single-indexed-listing rendered
+        assert "responsibilities[0] Own the backend service" in generation
+        assert "skills.required[0] Python" in generation
+        assert "`key[i]` pointer from the JOB POSTING listing" in generation
+
+        evaluation = calls[1]["prompt"]
+        assert "JD requirement this category scores: Own the backend service" in evaluation
+        assert "requirement_text" not in evaluation  # 4.1-a: no requirement_text anywhere
+    finally:
+        await conn.close()
+
+
+async def test_rubric_unresolvable_pointer_raises_and_rolls_back() -> None:
+    """An index that does not name a JD string field fails like malformed output."""
+    conn, user = await _register()
+    try:
+        await _add_provider(conn, user.id)
+        seed = await _seed(conn, user)
+        bad = json.loads(json.dumps(RUBRIC_POINTERS))
+        bad["categories"][0]["jd_sources"] = ["skills.required[7]"]  # out of range
+        factory, adapters, _ = scripted_factory({"gemini": [ok(json.dumps(bad))]})
+        with pytest.raises(RubricGenerationFailedError):
+            await score_job(conn, user_id=user.id, job_id=seed["job_id"], adapter_factory=factory)
+        assert _call_count(adapters) == 1  # no retry on malformed rubric (D54)
+        assert await _rubric_count(conn, seed["job_id"]) == 0
+        assert await _evidence_rows(conn, user.id) == []
+        assert (await _job_row(conn, user.id, seed["job_id"]))["status"] == "discovered"
+    finally:
+        await conn.close()
+
+
+async def test_rubric_hybrid_literal_and_pointer_mix() -> None:
+    """Legacy literal jd_sources and pointers may coexist (back-compat bucket)."""
+    conn, user = await _register()
+    try:
+        await _add_provider(conn, user.id)
+        seed = await _seed(conn, user)
+        mixed = json.loads(json.dumps(RUBRIC))
+        mixed["categories"][1]["jd_sources"] = ["Python", "skills.required[1]", "Docker"]
+        factory, adapters, _ = scripted_factory({"gemini": [ok(json.dumps(mixed)), ok(json.dumps(EVAL_HIGH))]})
+        result = await score_job(conn, user_id=user.id, job_id=seed["job_id"], adapter_factory=factory)
+        assert result.gate_miss is None
+        assert result.normalized == 93
     finally:
         await conn.close()
 
@@ -704,7 +775,6 @@ async def test_rubric_cache_invalidated_on_snapshot_change() -> None:
 
         rubric2 = json.loads(json.dumps(RUBRIC))
         rubric2["derivation"]["scoreable"].append("Terraform")
-        rubric2["categories"][1]["requirement_text"] += ", Terraform"
         rubric2["categories"][1]["jd_sources"].append("Terraform")
         factory2, adapters2, _ = scripted_factory({"gemini": [ok(json.dumps(rubric2)), ok(json.dumps(EVAL_HIGH))]})
         await score_job(conn, user_id=user.id, job_id=seed["job_id"], adapter_factory=factory2)
