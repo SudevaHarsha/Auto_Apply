@@ -14,8 +14,11 @@ Two numbers per call:
 - output = bounded estimate: responsibilities-driven ``echo_pool`` (rubric) or
   scaffolding + allowance (eval), padded by a verbosity allowance.
 
-``budget_expected`` is the D2c check the router uses: ``input + cap`` must fit a
-provider's ``tpm`` or the provider is skipped before any call is placed.
+``budget_expected`` is the D2c check the router uses: ``input + predicted output``
+must fit a provider's ``tpm`` or the provider is skipped before any call is placed.
+It budgets against the *realistic* output the step produces (per-step estimate),
+NOT the wire cap — ``max_output_tokens`` (the BASE safety ceiling, 6000) is sent
+separately and never inflated the budget math.
 
 Tokenizer: the same lazy ``tiktoken`` cl100k_base the extractor uses; falls back
 to a conservative chars/4 estimate when ``tiktoken`` is not installed (labelled
@@ -35,6 +38,13 @@ ALLOWANCE_RUBRIC = 3500
 ALLOWANCE_EVAL = 5000
 TAIL_SAFETY_FACTOR = 1.10
 _CHARS_PER_TOKEN = 4.0
+
+# Realistic completion sizes per pipeline step, used ONLY for budget gating.
+# These are predictions of actual output, not ceilings: the wire cap stays
+# ``BASE_OUTPUT_TOKENS`` (6000) regardless of the budget math.
+PREDICTED_OUTPUT_RUBRIC = 3300
+PREDICTED_OUTPUT_EVAL = 4500
+PREDICTED_OUTPUT_DEFAULT = 4500
 
 _TOKENIZER: Any = None
 
@@ -115,9 +125,35 @@ def count_prompt_tokens(prompt: str, system_message: str | None = None) -> int:
     return tokens(prompt) + tokens(system_message or "")
 
 
-def budget_expected(prompt_tokens: int, cap_output: int) -> int:
-    """``input + cap`` — the D2c number the router budgets a provider against."""
-    return prompt_tokens + cap_output
+def predicted_output_tokens(step: str | None = None) -> int:
+    """Realistic completion prediction for a pipeline step (budget gating only).
+
+    Returns the expected output size a step will actually produce — NOT a ceiling.
+    ``max_output_tokens`` (the 6000 BASE) is still sent to the provider as the
+    safety cap regardless of this number; only the budget check uses it.
+
+    Per-step defaults are env-tunable and only raised by override:
+      - rubric_generation: ``LLM_PREDICTED_OUTPUT_TOKENS_RUBRIC`` (default 3300)
+      - scoring:           ``LLM_PREDICTED_OUTPUT_TOKENS_EVAL``   (default 4500)
+      - anything else:     ``LLM_PREDICTED_OUTPUT_TOKENS``        (default 4500)
+    """
+    by_step = {
+        "rubric_generation": ("LLM_PREDICTED_OUTPUT_TOKENS_RUBRIC", PREDICTED_OUTPUT_RUBRIC),
+        "scoring": ("LLM_PREDICTED_OUTPUT_TOKENS_EVAL", PREDICTED_OUTPUT_EVAL),
+    }
+    env_name, default = by_step.get(step or "", ("LLM_PREDICTED_OUTPUT_TOKENS", PREDICTED_OUTPUT_DEFAULT))
+    return _env_allowance(env_name, default)
+
+
+def budget_expected(prompt_tokens: int, predicted_output: int) -> int:
+    """``input + predicted output`` — the D2c number the router budgets against.
+
+    Deliberately NOT ``input + cap``: the 6000 wire ceiling is a safety bound on
+    output alone, so adding it to the full input overstates the real call by the
+    whole cap. Budgeting against the realistic output keeps a provider that can
+    genuinely serve the call from being wrongly excluded.
+    """
+    return prompt_tokens + predicted_output
 
 
 def tail_allowance_from_samples(prose_tail_samples: list[int]) -> int:

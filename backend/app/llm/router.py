@@ -41,7 +41,7 @@ from backend.app.llm.adapters.base import ProviderAdapter
 from backend.app.llm.crypto import DecryptionError, decrypt_provider_key
 from backend.app.llm.errors import ProvidersExhaustedError
 from backend.app.llm.json_utils import parse_llm_json
-from backend.app.llm.limits import budget_expected, count_prompt_tokens
+from backend.app.llm.limits import budget_expected, count_prompt_tokens, predicted_output_tokens
 from backend.app.llm.registry import is_registered, spec_for
 
 TRIP_THRESHOLD = 3
@@ -293,7 +293,7 @@ async def route_llm_request(
                 continue
             spec = spec_for(name)
             budget = (
-                budget_expected(count_prompt_tokens(prompt, system_message), max_output_tokens)
+                budget_expected(count_prompt_tokens(prompt, system_message), predicted_output_tokens(step))
                 if max_output_tokens is not None
                 else None
             )
@@ -485,7 +485,7 @@ async def generate_structured(
                 continue
             spec = spec_for(name)
             budget = (
-                budget_expected(count_prompt_tokens(prompt, system_message), max_output_tokens)
+                budget_expected(count_prompt_tokens(prompt, system_message), predicted_output_tokens(step))
                 if max_output_tokens is not None
                 else None
             )

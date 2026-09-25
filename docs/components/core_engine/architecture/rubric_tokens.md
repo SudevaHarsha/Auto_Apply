@@ -15,13 +15,19 @@ Accompanying doc: `rubric_generator.md`. Live-test context recorded week of 2026
 | openrouter    | —              | —                 | —      | 402 insufficient_credits (billing, not tokens) |
 | gemini        | —              | —                 | ~9.8k  | 429 (free-tier generation quota) |
 
-Key structural fact: groq free tier = **8,000 tokens/min (TPM)**. A single rubric
-generation call runs ~8.0k total, so it alone consumes the entire window — every
-subsequent call in the same minute 429s. This is what blocks the live test
-`test_live_second_score_hits_rubric_cache` (fresh score + cache-hit re-score).
-The blocker is a **quota + completion-size problem combined**, not a code fault.
-(4.3's D2c budget gating now prevents the wasted call: rubric 2,421 + 6,000 cap
-= 8,421 > 8k, so groq is skipped and generation routes to gemini.)
+Key structural fact: groq free tier = **8,000 tokens/min (TPM)**. The original
+4.3 baseline treated a rubric call as ~8.0k total (completion ~5.8k), so it was
+thought to consume the entire window — that belief drove the live-test blocker
+`test_live_second_score_hits_rubric_cache` and the (wrong) routing conclusion below.
+
+**CORRECTED 2026-09-25 (4.4 budget-math fix):** the 4.3 gate added `max_output_tokens`
+(6000) to the full input, overstating every call by the whole safety cap. The D2c
+budget now uses the *realistic per-step output* instead: rubric 1,747 + 3,300 =
+5,047 and eval 2,105 + 4,500 = 6,605 both fit groq's 8,000 window. groq serves
+both steps; no routing change is required (see §4.4 below). The one residual edge:
+a worst-case eval whose output runs to the 6,000 cap = 2,105 + 6,000 = 8,105 >
+8,000 → single-full-length eval 429s → gemini absorbs it (deferred, deep-dive
+after 4.5).
 
 Completion (~5.8k) is ~2.7× the prompt (~2.1k). **Completion is the cost driver.**
 
@@ -268,17 +274,22 @@ end-to-end in 4.3 (D1-D4):
   - env overrides (`LLM_MAX_OUTPUT_TOKENS_RUBRIC`/`_EVAL`) only raise further.
 - **D2a exact input count** — the actually-rendered prompt + system message are
   token-counted via tiktoken cl100k_base before routing (char/4 is only the
-  no-tiktoken fallback). Live pins: rubric prompt 2,421; eval prompt 2,310
-  (char/4 would undercount by ~24%).
+  no-tiktoken fallback). Live pins: rubric rendered prompt 1,747; eval rendered
+  prompt 2,105 (provider-tokenizer counts run ~40% higher, e.g. 2,421/2,310, and
+  are NOT what the router budgets on; earlier notes wrongly used them —
+  see the 4.4 correction).
 - **D2c budget gating in `route_llm_request`/`generate_structured`** —
-  `budget_expected = prompt_tokens + cap` is checked against each provider's
-  declared `tpm` (`ProviderSpec.tpm`, registry; groq = 8000 measured). A provider
-  that cannot fit the expected call in its minute window is `budget_skip`-ped
-  BEFORE any call — no usage row, no breaker trip, recorded in `attempts`. All
-  under-cap -> `ProvidersExhaustedError` (fail-soft). Ground truth: rubric
-  2,421 + 6,000 = 8,421 > 8k groq, so **rubric generation must route to gemini**
-  (this is the 4.4 routing requirement, now math-enforced not config-only);
-  eval 2,310 + 6,000 = 6,828 fits.
+  `budget_expected = prompt_tokens + predicted_output(step)` is checked against
+  each provider's declared `tpm` (`ProviderSpec.tpm`, registry; groq = 8000
+  documented). A provider that cannot fit the expected call in its minute window
+  is `budget_skip`-ped BEFORE any call — no usage row, no breaker trip, recorded
+  in `attempts`. All under-cap -> `ProvidersExhaustedError` (fail-soft).
+  `predicted_output` is the *realistic* per-step completion (rubric 3300 / eval
+  4500, env-tunable), deliberately NOT the 6000 wire cap: 6000 is a safe output
+  ceiling, so adding it to the full input overstates the real call. Ground truth
+  (jd_1): rubric 1,747 + 3,300 = 5,047 < 8k → groq fits; eval 2,105 + 4,500 =
+  6,605 < 8k → groq fits. Both steps stay on groq — no routing change (this is
+  the 4.4 finding, see below).
 - **D1/D3 adapter caps + truncation detection** — every adapter carries the
   computed cap on the wire (`max_tokens` openai-compatible / `maxOutputTokens`
   gemini / `num_predict` ollama, only when the caller passes one) and flags
@@ -299,10 +310,25 @@ Per-call effect (jd_1): rubric cap stays at the 6000 base (the small JD's
 calculation ~3,724 < base); a synthetic 2,500-token responsibility pool raises
 it to 6,150. Eval cap is 6000 for common resumes and grows with long ones.
 
-### 4.4 Route generation to a high-quota provider
-- 8k TPM groq is too small for an ~8k call. Route `rubric_generation` to gemini
-  (larger free window; scored 64/100 fine in live test 1), keep groq for the
-  small eval. Pure config change — fixes the actual 429 blocker, not just raw cost.
+### 4.4 Route on realistic output, not the worst-case cap
+- **Correction (2026-09-25):** the earlier plan — "8k TPM groq is too small for an
+  ~8k call, route rubric generation to gemini, keep groq for the small eval" — was
+  built on budget math that added the **6000 safety ceiling to the full input**
+  (rubric 2,421+6,000=8,421; eval 2,310+6,000=6,828 miscounted). That overstates
+  every call by the whole cap. With the D2c budget fixed to use the *realistic
+  per-step output*, both calls fit groq (rubric 5,047 / eval 6,605 < 8,000), so
+  **no routing change is required**: groq serves both steps, gemini stays the
+  failover, not the primary. (This replaces the pre-4.4 "route to gemini"
+  requirement.) Verified against groq's published `gpt-oss-20b` free-tier limits
+  (`console.groq.com/docs/rate-limits`): 8k TPM / 30 RPM / 1k RPD / 200k TPD.
+- **TPM gating is generic, not groq-specific** — the budget check runs per
+  provider at its turn in the chain (`router.py:300-301`); only registry entries
+  declaring `tpm` are gated (groq=8000 today; gemini/openrouter unmetered). Adding
+  a future provider with a `tpm` gates it automatically.
+- **Known residual edge (deferred to the post-4.5 eval deep-dive):** a worst-case
+  eval whose output runs to the 6000 cap = 2,105+6,000 = 8,105 > 8,000 — a single
+  full-length eval 429s groq, trips its breaker, and gemini absorbs the call.
+  Documenting the decision here; behavior to be finalized with the eval work after 4.5.
 - `openrouter` was 402 insufficient_credits on 2026-09-22; the standing config
   is `qwen/qwen3.8-27b:free` (`registry.py:39`), which now returns **429
   temporarily rate-limited upstream** (ModelRun/Google shared pool — auth passes,

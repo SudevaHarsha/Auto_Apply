@@ -4,16 +4,18 @@ Covers the finalized 4.3 design end-to-end:
 
 * ``backend.app.llm.limits`` formula pins — ``cap = max(BASE=6000, calc)`` (the
   calculation only ever *raises* the base), responsibilities-driven ``echo_pool``,
-  ``budget_expected = input + cap``, and the exact input count (D2a).
+  ``budget_expected = input + predicted output`` (the realistic per-step output,
+  NOT the wire cap), and the exact input count (D2a).
 * Adapter wire behavior — the computed cap reaches the provider wire
   (``max_tokens`` / ``maxOutputTokens`` / ``num_predict``) and truncation is
   *detected*, not guessed (``finish_reason="length"``, ``finishReason="MAX_TOKENS"``,
   ``done_reason="length"``, plus the usage-arithmetic fallback) (D1/D3).
 * Router pass-through — ``route_llm_request`` forwards ``max_output_tokens`` to the
   adapter and returns ``truncated`` on the ``LLMResponse`` (D1).
-* D2c budget gating — a provider whose ``tpm`` cannot fit ``input + cap`` is
-  ``budget_skip``-ped *before* any call (no usage row, no breaker), while a
-  provider that fits still gets called.
+* D2c budget gating — a provider whose ``tpm`` cannot fit ``input + predicted
+  output`` (realistic completion, not the safety ceiling) is ``budget_skip``-ped
+  *before* any call (no usage row, no breaker), while a provider that fits still
+  gets called.
 * Consumer honesty (D4) — a truncated rubric/eval never reaches ``_coerce_rubric``
   (no silent JSON repair): it raises with ``output_truncated`` + ``can_continue``,
   preserving a content prefix for the interactive park-and-ask lane.
@@ -46,12 +48,16 @@ from backend.app.llm.errors import ProvidersExhaustedError  # noqa: E402
 from backend.app.llm.limits import (  # noqa: E402
     ALLOWANCE_RUBRIC,
     BASE_OUTPUT_TOKENS,
+    PREDICTED_OUTPUT_DEFAULT,
+    PREDICTED_OUTPUT_EVAL,
+    PREDICTED_OUTPUT_RUBRIC,
     SCAFFOLD_BOUND_RUBRIC,
     budget_expected,
     count_prompt_tokens,
     echo_pool_tokens,
     estimate_eval_cap,
     estimate_rubric_cap,
+    predicted_output_tokens,
     tokens,
 )
 from backend.app.llm.registry import REGISTRY, spec_for  # noqa: E402
@@ -122,8 +128,11 @@ def test_rubric_cap_rises_with_responsibilities() -> None:
     assert cap > BASE_OUTPUT_TOKENS, "large responsibilities must raise the cap above the 6000 base"
 
 
-def test_budget_expected_is_input_plus_cap() -> None:
-    assert budget_expected(2421, 6000) == 8421
+def test_budget_expected_is_input_plus_predicted_output() -> None:
+    """`budget_expected = input + predicted output` — the wire cap (6000) is NOT
+    added to the input: the realistic output the step produces drives the gate."""
+    assert budget_expected(2421, PREDICTED_OUTPUT_EVAL) == 2421 + PREDICTED_OUTPUT_EVAL
+    assert budget_expected(2421, PREDICTED_OUTPUT_RUBRIC) == 2421 + PREDICTED_OUTPUT_RUBRIC
     assert count_prompt_tokens("hello world") == tokens("hello world")
     assert count_prompt_tokens("hi", "sys") == tokens("hi") + tokens("sys")
 
@@ -256,24 +265,31 @@ async def test_router_forwards_cap_and_returns_truncated() -> None:
 
 # ======================================================== D2c: budget gating
 async def test_budget_skip_fits_capable_provider_still_called() -> None:
-    """groq tpm=8000 cannot fit 8421 (2421 prompt + 6000 cap) -> skipped, next fits."""
+    """A provider whose tpm cannot fit `input + predicted output` is skipped,
+    the fitting provider still answers. Predicted output raised via env to push
+    groq's 8000 tpm over the line (~3000-token prompt + 1000 predicted)."""
     conn, user = await _register()
     try:
-        # groq priority 0 (would be first), gemini priority 1.
-        await _add_provider(conn, user.id, "groq", priority=0)
-        await _add_provider(conn, user.id, "gemini", priority=1)
-        factory, adapters, _log = scripted_factory({"gemini": [ok("from gemini")]})
-        resp = await route_llm_request(
-            conn,
-            user_id=user.id,
-            prompt=_BIG_PROMPT,
-            max_output_tokens=6000,
-            provider_chain=["groq", "gemini"],
-            adapter_factory=factory,
-        )
-        assert resp.truncated is False
-        assert "groq" not in adapters, "groq must never be called when budget_expected > tpm"
-        assert "gemini" in adapters, "the fitting provider still answers"
+        os.environ["LLM_PREDICTED_OUTPUT_TOKENS_EVAL"] = "10000"
+        try:
+            # groq priority 0 (would be first), gemini priority 1.
+            await _add_provider(conn, user.id, "groq", priority=0)
+            await _add_provider(conn, user.id, "gemini", priority=1)
+            factory, adapters, _log = scripted_factory({"gemini": [ok("from gemini")]})
+            resp = await route_llm_request(
+                conn,
+                user_id=user.id,
+                prompt=_BIG_PROMPT,
+                max_output_tokens=6000,
+                step="scoring",
+                provider_chain=["groq", "gemini"],
+                adapter_factory=factory,
+            )
+            assert resp.truncated is False
+            assert "groq" not in adapters, "groq must never be called when budget_expected > tpm"
+            assert "gemini" in adapters, "the fitting provider still answers"
+        finally:
+            os.environ.pop("LLM_PREDICTED_OUTPUT_TOKENS_EVAL", None)
     finally:
         await conn.close()
 
@@ -282,22 +298,38 @@ async def test_budget_skip_all_providers_under_cap_exhausts() -> None:
     """When every configured provider is too small, we fail soft (exhausted)."""
     conn, user = await _register()
     try:
-        await _add_provider(conn, user.id, "groq")
-        factory, adapters, _log = scripted_factory({})
-        with pytest.raises(ProvidersExhaustedError) as excinfo:
-            await route_llm_request(
-                conn,
-                user_id=user.id,
-                prompt=_BIG_PROMPT,
-                max_output_tokens=6000,
-                provider_chain=["groq"],
-                adapter_factory=factory,
-            )
-        attempts = excinfo.value.details.get("attempts") or []
-        assert attempts and attempts[0].get("error_type") == "budget_skip"
-        assert "groq" not in adapters, "budget-skip must not place a call"
+        os.environ["LLM_PREDICTED_OUTPUT_TOKENS_EVAL"] = "10000"
+        try:
+            await _add_provider(conn, user.id, "groq")
+            factory, adapters, _log = scripted_factory({})
+            with pytest.raises(ProvidersExhaustedError) as excinfo:
+                await route_llm_request(
+                    conn,
+                    user_id=user.id,
+                    prompt=_BIG_PROMPT,
+                    max_output_tokens=6000,
+                    step="scoring",
+                    provider_chain=["groq"],
+                    adapter_factory=factory,
+                )
+            attempts = excinfo.value.details.get("attempts") or []
+            assert attempts and attempts[0].get("error_type") == "budget_skip"
+            assert "groq" not in adapters, "budget-skip must not place a call"
+        finally:
+            os.environ.pop("LLM_PREDICTED_OUTPUT_TOKENS_EVAL", None)
     finally:
         await conn.close()
+
+
+def test_predicted_output_is_per_step_realistic_not_the_cap() -> None:
+    """The budget predictor uses realistic completion sizes per step (< cap),
+    so a provider that can genuinely serve the call is not excluded."""
+    assert BASE_OUTPUT_TOKENS == 6000
+    assert predicted_output_tokens("rubric_generation") == PREDICTED_OUTPUT_RUBRIC
+    assert predicted_output_tokens("scoring") == PREDICTED_OUTPUT_EVAL
+    assert predicted_output_tokens("unknown_step") == PREDICTED_OUTPUT_DEFAULT
+    for step in ("rubric_generation", "scoring"):
+        assert predicted_output_tokens(step) < BASE_OUTPUT_TOKENS, "predictions must stay under the safety cap"
 
 
 def test_groq_spec_declares_measured_tpm() -> None:
