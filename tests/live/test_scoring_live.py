@@ -55,11 +55,17 @@ CHAIN = ROOT / "tests" / "live" / "chain"
 # tolerate modest score movement but a big swing on an identical input is a bug.
 APT_SCORE_DIFF = 10
 
-CLOUD_PROVIDERS = ("groq", "gemini", "openrouter")
+CLOUD_PROVIDERS = ("groq", "gemini", "openrouter", "nara", "cloudflare-ai")
 KEY_ENV = {
     "gemini": "LIVE_GEMINI_API_KEY",
     "groq": "LIVE_GROQ_API_KEY",
     "openrouter": "LIVE_OPENROUTER_API_KEY",
+    "nara": "LIVE_NARA_API_KEY",
+    "cloudflare-ai": "LIVE_CLOUDFLARE_AI_API_KEY",
+}
+BASE_URL_ENV = {
+    "ollama": "LIVE_OLLAMA_URL",
+    "cloudflare-ai": "LIVE_CLOUDFLARE_AI_BASE_URL",
 }
 
 
@@ -69,6 +75,14 @@ def _key(name: str) -> str | None:
     if not stripped or stripped.upper().startswith("PASTE_"):
         return None
     return stripped
+
+
+def _base_url(name: str) -> str | None:
+    env = BASE_URL_ENV.get(name, "")
+    raw = os.environ.get(env, "").strip() if env else ""
+    if not raw or raw.upper().startswith("PASTE_"):
+        return None
+    return raw
 
 
 def _configured() -> list[tuple[str, str | None]]:
@@ -181,7 +195,7 @@ async def _audits(conn: psycopg.AsyncConnection, user_id: uuid.UUID, action: str
 async def _add_providers(conn: psycopg.AsyncConnection, user_id: uuid.UUID) -> None:
     for index, (name, key) in enumerate(_configured()):
         await LlmProviderService(conn).add_provider(
-            user_id=user_id, name=name, base_url=None, api_key=key, priority=index
+            user_id=user_id, name=name, base_url=_base_url(name), api_key=key, priority=index
         )
 
 

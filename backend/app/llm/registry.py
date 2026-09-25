@@ -38,6 +38,14 @@ REGISTRY: dict[str, ProviderSpec] = {
     "ollama": ProviderSpec(OllamaAdapter, "http://localhost:11434", "llama3"),
     "groq": ProviderSpec(OpenAICompatibleAdapter, "https://api.groq.com/openai/v1", "openai/gpt-oss-20b", tpm=8000),
     "openrouter": ProviderSpec(OpenAICompatibleAdapter, "https://openrouter.ai/api/v1", "qwen/qwen3.8-27b:free"),
+    "nara": ProviderSpec(
+        OpenAICompatibleAdapter, "https://router.bynara.id/v1", "nemotron-3.5-lightning-free"
+    ),
+    "cloudflare-ai": ProviderSpec(
+        OpenAICompatibleAdapter,
+        "https://api.cloudflare.com/client/v4/accounts/<ACCOUNT_ID>/ai/v1",
+        "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+    ),
 }
 
 
