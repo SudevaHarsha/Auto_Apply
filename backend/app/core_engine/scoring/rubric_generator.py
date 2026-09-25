@@ -583,7 +583,7 @@ def _repair_suffix(gate: GateResult) -> str:
     return "\n\n" + "\n".join(parts)
 
 
-_POINTER_RE = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*)\[(\d+)\]$")
+_POINTER_RE = re.compile(r"^([^\[]+?)\[(\d+)\]$")
 
 
 def _looks_like_pointer(entry: str) -> bool:
@@ -597,6 +597,15 @@ def _resolve_pointer(body: dict[str, Any], pointer: str) -> str | None:
     addressable grammar). Returns ``None`` when the path misses or the target is
     not a string (never returns the raw pointer — an unresolved pointer is a
     malformed-rubric signal, not a pass-through).
+
+    Fix B (2026-09-25): ``_POINTER_RE`` was loosened from chained
+    ``[A-Za-z_]`` identifiers to any non-``[`` text (``[^\\[]+?``) so a
+    ``key.sub[i]`` line whose segment contains a *space* or apostrophe — e.g.
+    ``other.What You'll Do[0]`` — is classified as a pointer (previously it
+    failed ``_looks_like_pointer``, fell through as a literal, and leaked the
+    raw pointer placeholder into ``jd_sources``). The chain is still split on
+    ``.`` with each segment matched exactly against a body key, so resolution
+    stays strict and unresolved pointers still fail-loud.
     """
     match = _POINTER_RE.match(pointer.strip())
     if not match:

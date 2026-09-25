@@ -702,6 +702,63 @@ async def test_rubric_hybrid_literal_and_pointer_mix() -> None:
         await conn.close()
 
 
+async def test_rubric_spaced_dotted_pointer_resolves_not_leaks() -> None:
+    """Fix B: a `key.sub[i]` pointer whose segment carries a space/apostrophe
+    (e.g. `other.What You'll Do[0]`) must resolve to its JD literal, not pass
+    through as a raw pointer placeholder in jd_sources."""
+    conn, user = await _register()
+    try:
+        await _add_provider(conn, user.id)
+        payload = _jd_payload()
+        payload["other"] = {"What You'll Do": ["Demo your work to the client weekly"]}
+        async with DbContext(conn, user.id).transaction() as db:
+            job_row = await (
+                await db.execute(
+                    """INSERT INTO jobs (user_id, title, company, url, platform, source, status)
+                       VALUES (%s, %s, %s, %s, 'greenhouse', 'manual', 'discovered') RETURNING id""",
+                    (
+                        str(user.id),
+                        payload["title"],
+                        payload["company"],
+                        f"https://boards.greenhouse.io/scoring/{uuid.uuid4().hex}",
+                    ),
+                )
+            ).fetchone()
+            job_id = job_row[0]
+            snap_row = await (
+                await db.execute(
+                    "INSERT INTO job_snapshots (content_hash, payload, raw_text) VALUES (%s, %s, %s) RETURNING id",
+                    (uuid.uuid4().hex, Jsonb(payload), "spaced-key pointer fixture snapshot"),
+                )
+            ).fetchone()
+            snapshot_id = snap_row[0]
+            await db.execute("UPDATE jobs SET current_snapshot_id = %s WHERE id = %s", (str(snapshot_id), str(job_id)))
+            await db.execute(
+                "INSERT INTO profiles (user_id, original_pdf_url, json_resume) VALUES (%s, %s, %s)",
+                (str(user.id), "https://example.test/resume.pdf", Jsonb(_resume_payload())),
+            )
+
+        spaced = json.loads(json.dumps(RUBRIC))
+        spaced["categories"][0]["jd_sources"] = ["Own the backend service", "other.What You'll Do[0]"]
+        factory, adapters, _ = scripted_factory({"gemini": [ok(json.dumps(spaced)), ok(json.dumps(EVAL_HIGH))]})
+        result = await score_job(conn, user_id=user.id, job_id=job_id, adapter_factory=factory)
+        assert _call_count(adapters) == 2  # rubric + eval, no repair (Fix B resolves first try)
+        assert result.gate_miss is None  # resolved literal passes the same grounding gate
+
+        row = await CoreEngineRepository(conn).get_rubric(
+            job_id, snapshot_id=snapshot_id, schema_version=CURRENT_SCHEMA_VERSION
+        )
+        assert row is not None
+        cached = row["rubric"]
+        assert cached["categories"][0]["jd_sources"] == [
+            "Own the backend service",
+            "Demo your work to the client weekly",
+        ]
+        assert "What You'll Do[0]" not in json.dumps(cached)  # no raw pointer leaked anywhere
+    finally:
+        await conn.close()
+
+
 # ================================================================== 4 — cache (D58 / T7-9a,9b,9f)
 async def test_rubric_cache_hit_second_score_flag_declarations() -> None:
     """Second score of the same snapshot reuses rubric: 1 call, no new cache row."""

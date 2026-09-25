@@ -184,6 +184,20 @@ Honest math (this is the real large lever, NOT the inflated ~1k):
   unresolvable-pointer-raises-and-rolls-back, hybrid literal+pointer mix.
   Suite: `test_scoring.py` 25 passed + `test_scoring_guards.py` 10 passed (35 total).
 
+**FIX B 2026-09-25 (spaced/dotted `jd_sources` pointers).** 4.1 rendered the
+indexed listing verbatim, so a JD key containing a space/apostrophe produced a
+pointer line like `other.What You'll Do[0]`. `_POINTER_RE` only matched
+`[A-Za-z_]`-chained identifiers, so such a line failed `_looks_like_pointer`,
+fell through as a *literal*, and leaked the raw pointer placeholder into
+`jd_sources` (the grounding gate then passed it because the words do occur in
+the JD). Providers differ: gemini happened to emit literals; groq emitted the
+verbatim spaced pointers. Fix: `_POINTER_RE` is now `^([^\[]+?)\[(\d+)\]$` so
+spaced/apostrophed segments are classified as pointers; resolution still splits
+on `.` with exact body-key match, so unresolved pointers keep failing-loud
+(`RubricGenerationFailedError`). Tests: `tests/units/test_pointer_resolution.py`
+(8) + `tests/integration/test_scoring.py::test_rubric_spaced_dotted_pointer_resolves_not_leaks`
+(no raw pointer in the persisted envelope, gate still clean, 2 calls).
+
 **POST-4.1 CLEANUP 2026-09-24 (C1): removed `requirement_text` from the schema.**
 It was already dead in the forward path (no template, evaluator, or prompt
 references it; new rubrics emitted `""`). Dropping it everywhere:
