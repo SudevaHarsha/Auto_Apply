@@ -337,10 +337,131 @@ it to 6,150. Eval cap is 6000 for common resumes and grows with long ones.
   a prepaid OpenRouter balance once rate limit clears.
 
 ### 4.5 Trim the JD payload sent to the model
-- `jd_input()` (`rubric_generator.py:98`) sends the full corpus because the gate
-  needs tokens locally. The LLM only needs high-signal fields (skills,
-  responsibilities, schedule/location/visa). Compact the JSON for the request;
-  keep full payload on the server for `validate_partition`.
+- `jd_input()` (`rubric_generator.py:99`) sends the full corpus because the gate
+  needs tokens locally. The LLM only needs high-signal fields. Compact the JSON
+  for the request; keep the full payload on the server for `validate_partition`.
+
+**The two consumers (why this is safe at all).** The rubric-generation prompt
+(`rubric_generator_prompt.jinja:9`, `{{ jd_index or jd_json }}`) and the gate
+consume two *different* outputs of `jd_input()`:
+
+| Consumer | Consumes | Needs |
+|---|---|---|
+| LLM (generation prompt) | `jd_index` / `jd_json` — the indexed listing | high-signal fields only: required skills, responsibilities, schedule/shift/location/office-policy, sponsorship, degree |
+| Gate (`validate_partition`, `rubric_generator.py:467`) | `jd_tokens`, `required_skills`, `responsibilities` | the **full corpus** + exact coverage targets |
+
+`validate_partition` never reads `jd_json`/`jd_index` — grounding matches every
+`jd_sources` literal against `jd_tokens` (tokens of the full payload,
+`rubric_generator.py:511-512`), and coverage runs over `required_skills` +
+`responsibilities` (both derived from the full payload, L483-484). So **trimming
+the prompt-side listing cannot weaken the gate**; the gate stays 100% on
+server-side full payload. The only prompt-side inputs the gate checks
+indirectly are the band/JD wording that flow through `_anchor_lint` (L446-451) —
+unchanged.
+
+**Design.** `jd_input()` keeps returning both halves, but `jd_json`/`jd_index`
+are rendered from a **compact projection** of the body:
+- KEPT (the decision inputs STEP 1 partitions on): `title`, `skills`,
+  `responsibilities`, and the eligibility scalars/objects (`location`,
+  `remote_policy`, `employment_type`, `work_auth_visa`, `salary`, `education`,
+  `experience_range` when present).
+- **`other` is NOT a safe wholesale trim (CORRECTED 2026-09-25).** The original
+  draft assumed `other` holds only pitch/residual noise — from *one* fixture
+  (jd_1), where "What You'll Do" verbatim-duplicates `responsibilities`. The
+  second live fixture (jd_2) disproves that: its `other` carries real partition
+  inputs that live **nowhere else** —
+  - `Weekly Offs` (rotational 2-consecutive-day-off rule) — a unique
+    schedule/eligibility constraint;
+  - `Role Description` (the "stowing action" activity description) — unique
+    anchor vocabulary (`_anchor_lint` grounds band words in the full corpus,
+    `rubric_generator.py:446-448`);
+  - `Work Environment` (24x7 / 9-hour / night-shift specifics) — largely but
+    NOT fully duplicated by `responsibilities[3]` / `skills.required[6]`.
+  Coverage targets never include `other` (they are `skills.required` +
+  `responsibilities`, L483-484), so missing-`other` never trips coverage — the
+  loss would be **silent**: unique eligibility wording would never be recorded
+  in `derivation.eligibility` (the only downstream record; the eval prompt
+  renders generic eligibility text only, never the JD wording), and unique
+  vocabulary would leave the corpus the model can ground bands in.
+  - **Correct rule: warn-drop only zero-information `other` strings** — content
+    that is verbatim-identical to a kept `responsibilities`/required-skill
+    string (pure dedupe, vocabulary-neutral). Keep everything else in `other`.
+- TRIMMED (genuinely zero signal): `posted_at`, `_meta` (already excluded).
+- Candidate for trimming (needs a review call): `company`, `good_to_have`,
+  `screening_question_hints`. They are never coverage targets and carry no
+  scoreable signal, but they give the model context for honest
+  `derivation.removed` / anchor-language judgments.
+- `jd_body`, `jd_tokens`, `required_skills`, `responsibilities` stay
+  **full-payload** — `_resolve_pointer`, `validate_partition`, coverage, and
+  `_repair_suffix` are byte-for-byte unchanged.
+
+**Measured (2026-09-25, `_render_indexed_jd` walk):**
+
+| Fixture | full listing | `posted_at` + verbatim-dup `other` (safe) | naive `other` drop (REJECTED — loses jd_2 eligibility/vocabulary) |
+|---|---|---|---|
+| jd_1 | 3,003 chars / 40 lines | ~2,602 (−13%; only `other["What You'll Do"]` is a verbatim dup, 379 chars) | 1,448 (−52%) — safe only because this fixture's `other` is redundant |
+| jd_2 | 2,604 chars | ~2,514 (−3.5%; only `other["Hiring Duration"]` is a dup, 70 chars) | 1,390 (−47%) — **breaks**: drops `Weekly Offs` / `Role Description` / `Work Environment`, all unique |
+
+**Honest math (UNMEASURED until §6 tokenization).** Today's measured rubric
+rendered prompt is 1,747 tokens (D2a). The *safe* cut is small: best case
+(verbose JDs whose `other` heavily duplicates responsibilities) trims
+~400-500 chars ≈ −100-150 tokens → rubric expectation ~1,600 + 3,300 ≈ **4,900**
+vs today's 5,047 — single-digit headroom, **no routing change** (4.4 already
+fits both steps on groq). The 52-63% figures were wrong; do not implement
+wholesale `other` trimming.
+
+**Scope honesty.** 4.5 trims only the rubric **generation** call. The **eval**
+prompt is resume-driven (`text_content`) + per-category criteria and never
+embeds the JD listing — so 4.5 does **not** reduce the §4.4 residual edge
+(worst-case eval 8,105 > 8,000). That edge still waits for the post-4.5 eval
+deep-dive.
+
+**Deeper fix out of 4.5 scope (noted, not specced):** several `other` keys
+(`Weekly Offs`, `Work Environment`, `Role Description`) are partition-relevant
+content that door-4 extraction leaves in the residual catch-all. Routing
+schedule/`shift`/`office`-class content into real `StructuredJD` fields at
+extraction would earn the token cut legitimately. Until then `other` must go to
+the model largely in full.
+
+**DEFERRED DECISION (revisit after a 50-100 JD empirical sweep):** which `other`
+categories are recurring and partition-relevant enough to promote into real
+`StructuredJD` typed fields (candidates: `schedule`/`shift`, `work_environment`
+/`office_policy`, `compensation_notes`) — and then which schema fields to make
+**mandatory** — should be decided from data, not speculation. Plan: run the
+live/extraction suite over ~50-100 real JDs, tally recurring `other` keys vs
+typed-field candidates and per-field fill rates, and only then (a) promote the
+top candidates to typed fields (bump `CURRENT_SCHEMA_VERSION`), (b) mandate only
+fields the sweep shows the model fills reliably, (c) re-verify the 4.5 token trim
+on the shrunken `other`. Until that sweep exists, the required-`other` schema
+change (presence) is the safe interim; do not add further mandates.
+
+**The one behavioral risk (decision for review).** `_resolve_pointer`
+(_coerce_rubric time) resolves pointers against the *full* payload, so a model
+emitting a pointer/band referencing a trimmed, unseen field still grounds
+server-side. Options:
+1. **Soft (recommended):** rely on the existing prompt rule "reference JD text
+   ONLY with `key[i]` pointers from the listing above" + `_anchor_lint`/hard
+   gate. No new failure class; a hallucinated trimmed-field pointer only
+   survives if it is *also* in the corpus; invented sources are caught by
+   coverage if they miss a required/listed responsibility.
+2. Hard: resolve-and-check-at-coercion that every pointer targets a **kept**
+   field; a pointer into a trimmed field → `RubricGenerationFailedError` →
+   single repair call (reintroduces the repair-cost class 4.1-b removed).
+   Not recommended unless live measurement shows invented pointers.
+
+**Test plan (when approved):**
+- Unit `jd_input`: prompt-side drops `posted_at`/`_meta` and verbatim-duplicate
+  `other` strings, keeps all novel `other` content; `jd_body`/`jd_tokens` still
+  cover the FULL payload.
+- Unit (jd_2 lens): a novel `other` value (`Weekly Offs`) stays in the prompt
+  listing and remains pointer-resolvable + grounds server-side.
+- Integration `test_scoring.py`: jd_1 + jd_2 generations stay 1-call gate-clean
+  (no repair); coverage counts identical to pre-4.5.
+- Live/chain: render + token-count the compressed prompt on jd_1 and jd_2.
+- Regression: legacy cached rubrics unaffected (prompt-only change).
+
+**STATUS: DESIGN 2026-09-25 — corrected after review; pending review; NOT
+implemented.**
 
 ### Examined and rejected
 - Two-phase extract-then-build: adds a call, same total tokens.

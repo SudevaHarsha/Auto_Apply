@@ -183,7 +183,7 @@ class GoodToHaveSection(BaseModel):
 
     good_to_have: list[str] = Field(default_factory=list)
     screening_question_hints: list[str] = Field(default_factory=list)
-    other: list[OtherEntry] = Field(default_factory=list)
+    other: list[OtherEntry]
 
     @field_validator("other", mode="before")
     @classmethod

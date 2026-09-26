@@ -66,7 +66,7 @@ APP_URL = os.getenv("DATABASE_URL", "postgresql://app_user:changeme_in_productio
 
 PASSWORD = "Str0ng!password"
 
-DEFAULT_CHAIN = ["gemini", "ollama", "groq", "openrouter"]
+DEFAULT_CHAIN = ["gemini", "ollama", "groq", "openrouter", "nara", "cloudflare-ai"]
 
 PROVIDER_URLS = {"gemini": "https://generativelanguage.googleapis.com", "ollama": "http://localhost:11434"}
 

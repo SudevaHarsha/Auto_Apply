@@ -300,7 +300,7 @@ def _lever_posting_to_result(posting: dict[str, Any], route: DoorRoute) -> DoorR
         "title": _clean_value(_clean_str(posting.get("text"))),
         "company": _clean_value(_clean_str(posting.get("contactCompanyName") or route.slug)),
         "location": _clean_value(_clean_str(location)),
-        "employment_type": _clean_value(_clean_str(categories.get("commitment"))),
+        "employment_type": _normalize_employment_type(_clean_str(categories.get("commitment"))),
         "posted_at": posting.get("createdAt") or posting.get("updatedAt"),
     }
     salary = posting.get("salaryRange")
@@ -309,7 +309,7 @@ def _lever_posting_to_result(posting: dict[str, Any], route: DoorRoute) -> DoorR
             "min": salary.get("min"),
             "max": salary.get("max"),
             "currency": salary.get("currency"),
-            "period": salary.get("interval"),
+            "period": _normalize_salary_period(salary.get("interval")),
         }
     lists_html = "".join(
         f"<section>{_html_module.escape(loc.get('text') or '')}</section>"
@@ -398,7 +398,7 @@ def _json_ld_location(job: dict[str, Any]) -> tuple[str | None, str | None]:
                     labels.append(place_name)
         if loc_type == "VirtualLocation" or str(loc.get("name", "")).lower() in {"remote", "telecommute"}:
             remote = "fully-remote"
-    return (", ".join(labels) if labels else None), remote
+    return (", ".join(labels) if labels else None), _normalize_remote_policy(remote)
 
 
 def _compose_address(address: Any) -> str:
@@ -423,7 +423,11 @@ def _json_ld_salary(job: dict[str, Any]) -> dict[str, Any] | None:
         return None
     value = bs.get("value") if isinstance(bs, dict) else None
     currency = bs.get("currency") if isinstance(bs, dict) else None
-    period = bs.get("unitText") if isinstance(bs, dict) else None
+    # schema.org puts unitText on the QuantitativeValue node, not on MonetaryAmount.
+    period_src = bs.get("unitText") if isinstance(bs, dict) else None
+    if period_src is None and isinstance(value, dict):
+        period_src = value.get("unitText")
+    period = _normalize_salary_period(period_src)
     if isinstance(value, dict):
         raw_min, raw_max = value.get("minValue"), value.get("maxValue")
         if raw_min is None and raw_max is None:
@@ -444,6 +448,77 @@ def _json_ld_salary(job: dict[str, Any]) -> dict[str, Any] | None:
         if match:
             return {"min": float(match.group()), "max": float(match.group()), "currency": currency, "period": period}
     return None
+
+
+def _normalize_remote_policy(value: str | None) -> str | None:
+    """Map JSON-LD/ATS raw remote labels onto the Door-4 canonical vocabulary
+    ("Remote" | "Hybrid" | "On-site") so snapshots never mix spellings."""
+    if not value:
+        return None
+    key = _clean_str(value).strip().lower().replace("_", "-").replace(" ", "-")
+    canon = {
+        "remote": "Remote",
+        "fully-remote": "Remote",
+        "fullyremote": "Remote",
+        "telecommute": "Remote",
+        "work-from-home": "Remote",
+        "wfh": "Remote",
+        "hybrid": "Hybrid",
+        "onsite": "On-site",
+        "on-site": "On-site",
+        "in-person": "On-site",
+    }
+    return canon.get(key, _clean_value(_clean_str(value)))
+
+
+def _normalize_employment_type(value: str | None) -> str | None:
+    """Map schema.org/ATS raw employment-type tokens onto the Door-4 canonical
+    vocabulary ("Full-time" | "Part-time" | "Contract" | "Internship")."""
+    if not value:
+        return None
+    key = _clean_str(value).strip().lower().replace("_", "-").replace(" ", "-")
+    canon = {
+        "full-time": "Full-time",
+        "fulltime": "Full-time",
+        "ft": "Full-time",
+        "permanent": "Full-time",
+        "part-time": "Part-time",
+        "parttime": "Part-time",
+        "pt": "Part-time",
+        "contract": "Contract",
+        "contractor": "Contract",
+        "contractual": "Contract",
+        "temporary": "Contract",
+        "temp": "Contract",
+        "intern": "Internship",
+        "internship": "Internship",
+    }
+    return canon.get(key, _clean_value(_clean_str(value)))
+
+
+def _normalize_salary_period(value: str | None) -> str | None:
+    """Lowercase schema.org ``unitText`` (and ATS interval tokens) onto the
+    Door-4 "year/month/week/day/hour" vocabulary."""
+    if not value:
+        return None
+    key = _clean_str(value).strip().lower().replace("_", "-")
+    canon = {
+        "year": "year",
+        "yearly": "year",
+        "annual": "year",
+        "annum": "year",
+        "month": "month",
+        "monthly": "month",
+        "week": "week",
+        "weekly": "week",
+        "day": "day",
+        "daily": "day",
+        "hour": "hour",
+        "hr": "hour",
+        "hrs": "hour",
+        "hourly": "hour",
+    }
+    return canon.get(key, key or None)
 
 
 def _json_ld_experience(job: dict[str, Any]) -> dict[str, Any] | None:
@@ -484,7 +559,7 @@ def extract_json_ld(html: str | bytes) -> dict[str, Any]:
     location, remote = _json_ld_location(job)
     structured["location"] = location
     structured["remote_policy"] = remote
-    structured["employment_type"] = _first_text(job.get("employmentType"))
+    structured["employment_type"] = _normalize_employment_type(_first_text(job.get("employmentType")))
     structured["experience_range"] = _json_ld_experience(job)
     structured["salary"] = _json_ld_salary(job)
     structured["posted_at"] = _first_text(job.get("datePosted"))
@@ -592,22 +667,6 @@ def escalation_signal(text: str, url: str, *, html_len: int = 0) -> str | None:
     if _REAL_LIST_RE.search(lowered) and html_len < 4_096:
         return "Real list"
     return None  # pragma: no cover - callers treat None as "no escalation"
-
-
-def looks_like_js_shell(text: str, html: str | bytes) -> bool:
-    """D39 Gate 3.5: raw HTML with markup but near-zero usable posting text.
-
-    Mirrors Firecrawl's "JS needed" routing (``#root``/``#app`` mount markers
-    plus script-bundle presence). Only fires when httpx really came up empty —
-    normal pages never pay the browser cost.
-    """
-    if len(text.strip()) > 1000:
-        return False
-    chunk = html.decode("utf-8", errors="replace") if isinstance(html, bytes) else (html or "")
-    has_mount_marker = any(
-        marker in chunk for marker in ('id="root"', "id='root'", 'id="app"', "id='app'", "<noscript>")
-    )
-    return bool(has_mount_marker) and len(text.strip()) < 500
 
 
 def door_route(url: str) -> DoorRoute:

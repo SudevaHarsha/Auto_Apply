@@ -101,6 +101,11 @@ async def _resolve_ip_candidates(host: str) -> list[str]:
     return [str(info[4][0]) for info in infos]
 
 
+async def ssrf_allows(url: str) -> bool:
+    """Public SSRF posture check (D33) — shares the per-hop guard with the browser engine."""
+    return await _ssrf_allows(url)
+
+
 async def _ssrf_allows(url: str) -> bool:
     """SSRF posture check for one hop — literal IP or full DNS resolution scan."""
     parsed = urlparse(url)

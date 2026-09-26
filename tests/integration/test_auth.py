@@ -52,7 +52,7 @@ EXPECTED_DEFAULTS = {
     "theme": "dark",
     "auto_approve_threshold": 80,
     "notifications_enabled": True,
-    "llm_chain": ["gemini", "ollama", "groq", "openrouter"],
+    "llm_chain": ["gemini", "ollama", "groq", "openrouter", "nara", "cloudflare-ai"],
 }
 
 

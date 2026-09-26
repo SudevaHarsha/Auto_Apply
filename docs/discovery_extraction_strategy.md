@@ -161,9 +161,9 @@ Extended from our current Title/Company/Skills/Requirements model toward AutoApp
   "title": "...",
   "company": "...",
   "location": "...",
-  "remote_policy": "onsite | hybrid | remote",
-  "employment_type": "full_time | contract | ...",
-  "seniority": "junior | mid | senior | staff | lead",
+  "remote_policy": "On-site | Hybrid | Remote",
+  "employment_type": "Full-time | Part-time | Contract | Internship",
+  "seniority": "Junior | Mid-level | Senior | Staff | Principal | Lead | Manager",
   "experience_range": {"min_years": 3, "max_years": null},
   "salary": {"min": null, "max": null, "currency": "USD", "period": "year"},
   "skills": {

@@ -3,10 +3,11 @@
 The full production cascade with real ATS postings from ``LIVE_ATS_URL`` and NO
 mock anywhere:
 
-  real ``fetch_http`` (NAT64-aware SSRF guard, D33) → Door-1 JSON-LD / Door 2-3
-  text extraction → Door 4 mandatory 4-section LLM calls via the default adapter
-  factory (real providers, keys from ``.env.live``) → Door 5 gap-fill → plausibility
-  gate → snapshot + job rows persisted with ``content_hash``/``raw_text`` (D28).
+  real ``default_fetch`` (browser-first Playwright render with httpx fallback;
+  NAT64-aware SSRF guard, D33) → Door-1 JSON-LD / Door 2-3 text extraction →
+  Door 4 mandatory 4-section LLM calls via the default adapter factory (real
+  providers, keys from ``.env.live``) → Door 5 gap-fill → plausibility gate →
+  snapshot + job rows persisted with ``content_hash``/``raw_text`` (D28).
 
 Cache is disabled for these runs so every execution is a genuine fresh extraction
 (``JD_CACHE_ENABLED=0`` — the URL-keyed cache is shared across users and would
@@ -157,7 +158,7 @@ async def _run_one(conn: psycopg.AsyncConnection, user_id: uuid.UUID, url: str) 
         str(user_id),
     )
     try:
-        result = await extract_job(conn, user_id, url, adapter_factory=None, fetch=None, render=None)
+        result = await extract_job(conn, user_id, url, adapter_factory=None, fetch=None)
     except _ATS_OUTAGES as exc:
         pytest.skip(f"live ATS unreachable/blocked for {url}: {exc}")
     except Exception as exc:  # noqa: BLE001 - surface 429/quota distinctly below

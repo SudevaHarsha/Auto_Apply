@@ -1,8 +1,8 @@
 """JD extractor cascade (S6) — the main service layer for job-posting extraction.
 
 Mandatory 4-section Door 4 (D34/D40/D41), freshness gating, D27/D45 budget
-accounting, shared cache fast-path (I4), and browser-escalation (D39) live here.
-Audits via ``ObservabilityRepository``; persistence via ``CoreEngineRepository``.
+accounting, shared cache fast-path (I4), and browser-first fetching (D39) live
+here. Audits via ``ObservabilityRepository``; persistence via ``CoreEngineRepository``.
 No HTTP routes — ``backend_api`` (S14) wires them.
 
 Guardrails ported from Firecrawl's ``transformers/llmExtract.ts`` algorithms:
@@ -42,7 +42,6 @@ from backend.app.core_engine.jd_doors import (
     door1_lever,
     extract_json_ld,
     gaps_for,
-    looks_like_js_shell,
     strip_to_text,
 )
 from backend.app.core_engine.jd_fetch import FetchedResult, fetch_http
@@ -308,6 +307,21 @@ async def default_fetch(
     headers: dict[str, str] | None = None,
     client: Any | None = None,
 ) -> FetchedResult:
+    """Default Door 2-3 fetch (D29/D33/D37/D39): browser-first, httpx fallback.
+
+    Renders the page with Playwright when ``JD_RENDER_AVAILABLE`` is enabled —
+    so JS-shell postings need no template-matching heuristic (D31/D39) — and
+    falls back to the httpx engine when the browser is unavailable/disabled or
+    the render fails. SSRF + robots guards run inside either engine (D33/D37).
+    """
+    from backend.app.core_engine.jd_fetch_browser import fetch_browser, jd_render_enabled
+
+    if jd_render_enabled():
+        try:
+            return await fetch_browser(url, ssrf_guard=ssrf_guard, respect_robots=respect_robots)
+        except Exception:
+            logger.warning("browser fetch failed for %s; falling back to httpx", url, exc_info=True)
+
     return await fetch_http(
         url,
         ssrf_guard=ssrf_guard,
@@ -315,17 +329,6 @@ async def default_fetch(
         headers=headers,
         client=client,
     )
-
-
-async def default_render(url: str, *, playwright: Any | None = None) -> FetchedResult | None:
-    try:
-        from backend.app.core_engine.jd_fetch_browser import fetch_browser, jd_render_enabled
-
-        if not jd_render_enabled():
-            return None
-        return await fetch_browser(url, playwright=playwright)
-    except Exception:
-        return None
 
 
 # ---------------------------------------------------------------------------
@@ -640,17 +643,15 @@ async def extract_job(
     url: str,
     *,
     fetch: Callable[..., Any] | None = None,
-    render: Callable[..., Any] | None = None,
     source: str = "manual",
     adapter_factory: Callable[[str], Any] | None = None,
     now: datetime | None = None,
 ) -> JobExtraction:
-    """Full S6 cascade: classify → doors 1-3 (+ render) → mandatory 4-section Door 4 →
+    """Full S6 cascade: classify → doors 1-3 → mandatory 4-section Door 4 →
     Door 5 gap-fill → plausibility gate → persist + audits."""
     now = now or datetime.now(UTC)
     iso_now = now.isoformat()
     fetch_call = fetch or default_fetch
-    render_call = render or default_render
 
     route = classify_url(url)
 
@@ -738,6 +739,7 @@ async def extract_job(
             decoded_body = fetched.body.decode("utf-8", errors="replace")
             html = decoded_body
             hash_body = fetched.body
+            engine = fetched.engine
             jsonld_dict = extract_json_ld(fetched.body)
             jsonld_found = bool(jsonld_dict)
             for key, value in jsonld_dict.items():
@@ -750,27 +752,6 @@ async def extract_job(
                     accumulator[key] = value
 
         cleaned_text = strip_to_text(html or "")
-
-        # Gate 3.5 — JS-shell browser escalation (D39/D31)
-        if html and looks_like_js_shell(cleaned_text, html):
-            try:
-                rendered = await render_call(final_url)
-                if rendered is not None and rendered.body:
-                    rendered_text = strip_to_text(rendered.body)
-                    if len(rendered_text.strip()) > len(cleaned_text.strip()):
-                        cleaned_text = rendered_text
-                        html = rendered.body.decode("utf-8", errors="replace")
-                        engine = "browser"
-                        final_url = rendered.url
-                        rendered_jsonld = extract_json_ld(rendered.body)
-                        if rendered_jsonld:
-                            jsonld_found = True
-                            for key, value in rendered_jsonld.items():
-                                if key != "_html" and value is not None and accumulator.get(key) is None:
-                                    accumulator[key] = value
-                        hash_body = rendered.body
-            except Exception:
-                pass  # escalation best-effort; proceed with httpx text
 
         # --- Door 4 (mandatory, D40/D41) ---
         budget = _BudgetTracker()
@@ -841,9 +822,24 @@ async def extract_job(
                     budget.accrue(resp.prompt_tokens or 0, resp.completion_tokens or 0)
                     if not _is_refusal(resp.content or ""):
                         parsed_door5 = parse_llm_json(resp.content or "")
-                        if parsed_door5 is not None:
-                            stripped = {k: v for k, v in parsed_door5.items() if k != "_meta"}
-                            merge_over(accumulator, stripped)
+                        if isinstance(parsed_door5, dict):
+                            # D49: Door-5 is a fail-open best-effort pass — a drifty
+                            # contribution (invented key, wrong shape) must NEVER sink
+                            # the whole extraction at the forbid-gated schema gate.
+                            # Enforce the prompt's "fill ONLY the missing criticals"
+                            # contract, then validate the merged preview before applying.
+                            allowed = set(remaining_gaps.missing_criticals)
+                            stripped = {k: v for k, v in parsed_door5.items() if k != "_meta" and k in allowed}
+                            if stripped:
+                                preview = dict(accumulator)
+                                preview.update(stripped)
+                                preview["_meta"] = {"schema_version": CURRENT_SCHEMA_VERSION}
+                                try:
+                                    StructuredJD(**preview)
+                                except Exception:
+                                    gaps_recorded.append("door5: schema_filtered")
+                                else:
+                                    merge_over(accumulator, stripped)
                 except ProvidersExhaustedError:
                     gaps_recorded.append("door5: router_exhausted")
                 except Exception:
@@ -960,7 +956,6 @@ async def refresh_job(
     job_id: uuid.UUID,
     *,
     fetch: Callable[..., Any] | None = None,
-    render: Callable[..., Any] | None = None,
     adapter_factory: Callable[[str], Any] | None = None,
     now: datetime | None = None,
 ) -> FreshnessResult:
@@ -1011,7 +1006,6 @@ async def refresh_job(
             user_id,
             url,
             fetch=fetch,
-            render=render,
             adapter_factory=adapter_factory,
             now=now,
         )

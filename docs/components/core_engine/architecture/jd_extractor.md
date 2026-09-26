@@ -105,9 +105,9 @@ Extended schema with per-field provenance. Each field carries `confidence` + `ex
   "title": "Senior Backend Engineer",
   "company": "Stripe",
   "location": "San Francisco, CA (Remote)",
-  "remote_policy": "remote",
-  "employment_type": "full_time",
-  "seniority": "senior",
+  "remote_policy": "Remote",
+  "employment_type": "Full-time",
+  "seniority": "Senior",
   "experience_range": {"min_years": 5, "max_years": null},
   "salary": {"min": 150000, "max": 200000, "currency": "USD", "period": "year"},
   "skills": {
