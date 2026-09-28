@@ -34,6 +34,7 @@ the same transaction as the score so a failed score rolls the cache back too
 
 from __future__ import annotations
 
+import difflib
 import hashlib
 import json
 import logging
@@ -250,6 +251,7 @@ def build_role_definition(rubric: RubricSchema, *, name: str) -> RoleDefinition:
         bonus_max=rubric.bonus_max,
         bonus_signals=rubric.bonus_signals,
         category_keys=category_keys,
+        first_category_key=rubric.categories[0].key if rubric.categories else "category_key",
         categories=category_dicts,
         default_bands=(shared or {}).get("default_bands"),
         text_content="{{ text_content }}",
@@ -410,6 +412,51 @@ def _tokens(text: str) -> frozenset[str]:
     return frozenset(token for token in _norm(text).split() if len(token) > 1 and token not in _STOPWORDS)
 
 
+_CEILING_ROOTS: dict[str, tuple[str, ...]] = {
+    "client": ("client", "clients"),
+    "customer": ("customer", "customers"),
+    "stakeholder": ("stakeholder", "stakeholders"),
+    "production": ("production", "productions", "prod"),
+    "operations": (
+        "ops",
+        "operation",
+        "operations",
+        "operational",
+        "operator",
+        "operators",
+        "operate",
+        "operates",
+        "operating",
+        "operated",
+    ),
+    "incident": ("incident", "incidents", "incidental"),
+    "uptime": ("uptime", "uptimes"),
+    "reliability": ("reliability", "reliabilities", "reliable", "reliably"),
+    "sre": ("sre",),
+    "pager": ("pager", "pagers"),
+    "sla": ("sla", "slas"),
+    "call": ("call", "calls", "called", "calling", "caller", "callers"),
+    "ownership": ("ownership", "own", "owns", "owned", "owning", "owner", "owners"),
+}
+
+_CEILING_BY_SURFACE: dict[str, str] = {
+    surface: root for root, surfaces in _CEILING_ROOTS.items() for surface in surfaces
+}
+
+
+def _ceiling_related(band_token: str, jd_roots: frozenset[str]) -> bool:
+    """True when a ceiling-vocab band token's morphological family appears in the JD.
+
+    The ceiling set is fixed, so the "stem" is an explicit family table
+    (``_CEILING_ROOTS``): ``prod``/``production``, ``ownership``/``own``,
+    ``reliability``/``reliable`` all resolve to one root. A band term is grounded
+    only when some JD surface form belongs to the same family — true inventions
+    (``sla`` with a JD that only says "slack") stay rejected.
+    """
+    root = _CEILING_BY_SURFACE.get(band_token)
+    return root is not None and root in jd_roots
+
+
 @dataclass
 class GateResult:
     """S7-v2 partition-gate verdict (§10.4)."""
@@ -480,6 +527,9 @@ def validate_partition(rubric: RubricSchema, jd: dict[str, Any]) -> GateResult:
     """
     result = GateResult()
     jd_tokens: frozenset[str] = jd.get("jd_tokens") or frozenset()
+    jd_roots: frozenset[str] = frozenset(
+        _CEILING_BY_SURFACE[token] for token in jd_tokens if token in _CEILING_BY_SURFACE
+    )
     required = list(jd.get("required_skills") or [])
     responsibilities = list(jd.get("responsibilities") or [])
 
@@ -512,7 +562,7 @@ def validate_partition(rubric: RubricSchema, jd: dict[str, Any]) -> GateResult:
                 result.hard.append(f"{cat.key}: jd_sources {source!r} is not a literal string in the JD payload")
 
         band_tokens: frozenset[str] = frozenset(token for anchor in anchors for token in _tokens(anchor.band))
-        invented = band_tokens & _CEILING_VOCAB - (jd_tokens & _CEILING_VOCAB)
+        invented = {token for token in (band_tokens & _CEILING_VOCAB) if not _ceiling_related(token, jd_roots)}
         if invented:
             result.hard.append(
                 f"{cat.key}: bands invent ceiling vocabulary {sorted(invented)} not present in the JD payload"
@@ -590,6 +640,48 @@ def _looks_like_pointer(entry: str) -> bool:
     return _POINTER_RE.match(entry.strip()) is not None
 
 
+def _normalize_section(text: str) -> str:
+    """Collapse a section key to alnum lowercase chunks for near-match resolution.
+
+    ``Why Join Stackbinary?`` → ``whyjoinstackbinary``; ``What You'll Do`` →
+    ``whatyoullDo``. Punctuation (``?``/``!``/``'``/``:``/spaces) is stripped so
+    drift on those characters does not force a hard reject.
+    """
+    return "".join(chunk.lower() for chunk in _norm(text).split())
+
+
+def _resolve_section(node: dict[str, Any], part: str) -> Any | None:
+    """Resolve ``part`` against ``node`` via exact key, then best near-match ≥ 80%.
+
+    4.1-d (2026-09-28): Groq dropped the ``?`` from ``Why Join Stackbinary?``
+    when emitting ``other.Why Join Stackbinary[3]``, and exact-key resolution
+    hard-rejected a full rubric over one punctuation character. Exact lookup
+    stays first; on a miss we fall back to the highest-scoring key under
+    ``SequenceMatcher`` on normalized sections when it reaches ≥ 0.8 AND beats
+    every other candidate strictly (a tie or a < 80% best still returns ``None``
+    → the pointer still fails loud, never miswired).
+    """
+    if not isinstance(node, dict):
+        return None
+    if part in node:
+        return node[part]
+    target = _normalize_section(part)
+    best_score = 0.0
+    best_value: Any | None = None
+    for key, value in node.items():
+        if not isinstance(key, str):
+            continue
+        score = difflib.SequenceMatcher(None, target, _normalize_section(key)).ratio()
+        if score > best_score:
+            best_score = score
+            best_value = value
+        elif score == best_score and score > 0:
+            best_value = None
+    if best_score >= 0.8 and best_value is not None:
+        return best_value
+    return None
+
+
 def _resolve_pointer(body: dict[str, Any], pointer: str) -> str | None:
     """Resolve a ``key[i]`` / ``key.sub[i]`` pointer to its literal payload string.
 
@@ -604,8 +696,8 @@ def _resolve_pointer(body: dict[str, Any], pointer: str) -> str | None:
     ``other.What You'll Do[0]`` — is classified as a pointer (previously it
     failed ``_looks_like_pointer``, fell through as a literal, and leaked the
     raw pointer placeholder into ``jd_sources``). The chain is still split on
-    ``.`` with each segment matched exactly against a body key, so resolution
-    stays strict and unresolved pointers still fail-loud.
+    ``.`` with each segment resolved exactly-then-best-match (4.1-d), so
+    resolution stays strict and unresolved pointers still fail-loud.
     """
     match = _POINTER_RE.match(pointer.strip())
     if not match:
@@ -614,9 +706,9 @@ def _resolve_pointer(body: dict[str, Any], pointer: str) -> str | None:
     index = int(match.group(2))
     node: Any = body
     for part in parts:
-        if not isinstance(node, dict) or part not in node:
+        node = _resolve_section(node, part)
+        if node is None:
             return None
-        node = node[part]
     if not isinstance(node, list) or index >= len(node):
         return None
     value = node[index]

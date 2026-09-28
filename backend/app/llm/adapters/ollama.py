@@ -31,6 +31,7 @@ class OllamaAdapter:
         json_mode: bool = False,
         output_schema: dict[str, Any] | None = None,
         max_output_tokens: int | None = None,
+        temperature: float | None = None,
         timeout: float = 20.0,
     ) -> ChatResponse:
         url = f"{base_url.rstrip('/')}/api/chat"
@@ -43,6 +44,8 @@ class OllamaAdapter:
             body["format"] = "json"
         if max_output_tokens is not None:
             body["num_predict"] = max_output_tokens
+        if temperature is not None:
+            body["temperature"] = temperature
         started = time.monotonic()
         try:
             with httpx.Client(transport=self._transport, timeout=timeout) as client:

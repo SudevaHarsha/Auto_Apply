@@ -14,6 +14,8 @@ dist/
 tests/live/pdf/
 # real payloads captured from live S5/S6 runs, consumed by S7 live score seed
 tests/live/chain/
+# eval corpus holds a real captured resume (never commit); lives locally only
+tests/evals/
 *.log
 .idea/
 .vscode/

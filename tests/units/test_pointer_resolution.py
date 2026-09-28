@@ -53,3 +53,38 @@ def test_tradeoff_text_with_bracket_suffix_is_now_pointer_like() -> None:
     direction: it resolves to None -> malformed, never leaks as a literal)."""
     assert _looks_like_pointer("See the full JD[3]") is True
     assert _resolve_pointer(BODY, "See the full JD[3]") is None
+
+
+BODY_PUNCT = {
+    "responsibilities": ["Build features", "Fix bugs"],
+    "other": {
+        "Why Join Stackbinary?": ["learn fast", "own a slice", "senior review", "live client", "AI tools", "docs"],
+    },
+}
+
+
+def test_question_mark_dropped_from_section_key_still_resolves() -> None:
+    """4.1-d: Groq emitted ``other.Why Join Stackbinary[3]`` dropping the ``?`` —
+    near-match resolution must recover it instead of hard-rejecting."""
+    assert _resolve_pointer(BODY_PUNCT, "other.Why Join Stackbinary[3]") == "live client"
+
+
+def test_exact_key_shortcircuits_before_near_match() -> None:
+    assert _resolve_pointer(BODY_PUNCT, "other.Why Join Stackbinary?[5]") == "docs"
+
+
+def test_apostrophe_drift_still_resolves() -> None:
+    assert _resolve_pointer(BODY, "other.What Youll Do[0]") == BODY["other"]["What You'll Do"][0]
+
+
+def test_below_threshold_similarity_still_fails_loud() -> None:
+    """A section so unlike any real key (< 80%) must NOT resolve — invented
+    pointers stay hard-rejected, never silently rewired to the wrong section."""
+    assert _resolve_pointer(BODY, "other.Completely Unrelated Heading[0]") is None
+
+
+def test_ambiguous_near_match_tie_still_fails_loud() -> None:
+    """Two distinct keys that normalize identically (``A B`` vs ``AB``) must not
+    be disambiguated — a tie resolves to None, never a coin-flip wiring."""
+    ambiguous = {"A B": ["x"], "AB": ["y"]}
+    assert _resolve_pointer(ambiguous, "a b[0]") is None

@@ -409,11 +409,22 @@ def test_eval_criteria_drops_jd_sources_and_dedupes_shared_anchor_ladder() -> No
     assert "SHARED SCORE BANDS" not in distinct_role.criteria
 
 
-def test_eval_criteria_includes_calibration_example() -> None:
-    """Upgrade-2b: the eval prompt carries a compact band-usage worked example."""
+def test_eval_criteria_includes_one_shot_example() -> None:
+    """Upgrade-2b/S9: the eval prompt carries a compact one-shot worked example.
+
+    It replaces the removed ``CALIBRATION EXAMPLE`` block (those prompt tokens are
+    now spent on the one-shot shape + rule-5 word caps): the example is anchored
+    to the FIRST category key, cites ``r[i]`` evidence pointers, and sits directly
+    above the indexed resume listing. The guard
+    ``test_rubric_template_has_no_calibration_block`` keeps the old block from
+    creeping back into the template.
+    """
     role = _role_from(RUBRIC)
-    assert "CALIBRATION EXAMPLE" in role.criteria
-    assert "api_design" in role.criteria and "mentorship" in role.criteria
+    criteria = role.criteria
+    assert "One-shot shape to mimic" in criteria
+    assert f'{{"scores": {{"{RUBRIC["categories"][0]["key"]}"' in criteria
+    assert '"evidence": "r4 r9"' in criteria
+    assert criteria.index("One-shot shape to mimic") < criteria.index("Resume to evaluate")
 
 
 def test_normalize_and_total_math() -> None:
@@ -556,16 +567,20 @@ async def test_scoring_call_shapes_json_mode_and_schema() -> None:
         schema = calls[1]["output_schema"]
         assert "scores" in schema["properties"] and "bonus_points" in schema["properties"]
         assert "eligibility" in schema["properties"] and "critical_gaps" in schema["properties"]
-        # evaluation prompt carries the resume text (D48)
-        assert "Ada Lovelace" in calls[1]["prompt"]
+        # evaluation prompt carries the resume text (D48); S8 sends the content
+        # without personal identifiers and renders it as an indexed r[i] listing
+        assert "=== WORK EXPERIENCE ===" in calls[1]["prompt"]
+        assert "Ada Lovelace" not in calls[1]["prompt"]
+        assert "r0 === BASIC INFORMATION ===" in calls[1]["prompt"]
         # rubicon prompt carries the title + a single indexed JOB POSTING listing (B1/4.1-c)
         assert "TITLE: Senior Backend Engineer" in calls[0]["prompt"]
         assert "JOB POSTING" in calls[0]["prompt"]
         assert "skills.required[0] Python" in calls[0]["prompt"]
-        # 4.2a: band cap + grounding; 4.2c: weight by JD emphasis (skeleton shows max 30)
+        # 4.2a: band cap + grounding; 4.2c: weight by JD emphasis (skeleton example
+        # categories carry explicit max weights 40/20/20)
         assert "top band equals category max" in calls[0]["prompt"]
         assert "infer importance from generic industry expectations" in calls[0]["prompt"]
-        assert '"max": 30' in calls[0]["prompt"]
+        assert '"max": 40' in calls[0]["prompt"] and '"max": 20' in calls[0]["prompt"]
     finally:
         await conn.close()
 
@@ -658,7 +673,7 @@ async def test_rubric_pointers_resolve_and_gate_verdict_unchanged() -> None:
         assert "JOB POSTING" in generation  # 4.1-c single-indexed-listing rendered
         assert "responsibilities[0] Own the backend service" in generation
         assert "skills.required[0] Python" in generation
-        assert "`key[i]` pointer from the JOB POSTING listing" in generation
+        assert "`key[i]` pointers from the JOB POSTING listing above" in generation
 
         evaluation = calls[1]["prompt"]
         assert "JD requirement this category scores: Own the backend service" in evaluation

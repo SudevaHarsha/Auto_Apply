@@ -39,6 +39,7 @@ class MockProviderAdapter:
         json_mode: bool = False,
         output_schema: dict[str, Any] | None = None,
         max_output_tokens: int | None = None,
+        temperature: float | None = None,
         timeout: float = 20.0,
     ) -> ChatResponse:
         if self._log is not None:
@@ -53,6 +54,7 @@ class MockProviderAdapter:
                     "json_mode": json_mode,
                     "output_schema": output_schema,
                     "max_output_tokens": max_output_tokens,
+                    "temperature": temperature,
                 }
             )
         if self.scheduled:

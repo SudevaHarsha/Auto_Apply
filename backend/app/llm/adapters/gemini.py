@@ -35,13 +35,14 @@ class GeminiAdapter:
         json_mode: bool = False,
         output_schema: dict[str, Any] | None = None,
         max_output_tokens: int | None = None,
+        temperature: float | None = None,
         timeout: float = 20.0,
     ) -> ChatResponse:
         url = f"{base_url.rstrip('/')}/v1beta/models/{model}:generateContent"
         body: dict[str, Any] = {"contents": [{"role": "user", "parts": [{"text": prompt}]}]}
         if system_message:
             body["system_instruction"] = {"parts": [{"text": system_message}]}
-        if json_mode or max_output_tokens is not None:
+        if json_mode or max_output_tokens is not None or temperature is not None:
             generation: dict[str, Any] = {}
             if json_mode:
                 generation["responseMimeType"] = "application/json"
@@ -49,6 +50,8 @@ class GeminiAdapter:
                     generation["responseSchema"] = gemini_response_schema(output_schema)
             if max_output_tokens is not None:
                 generation["maxOutputTokens"] = max_output_tokens
+            if temperature is not None:
+                generation["temperature"] = temperature
             body["generationConfig"] = generation
         headers = {"x-goog-api-key": api_key} if api_key else {}
         started = time.monotonic()

@@ -11,35 +11,8 @@ pointers; scalars like location/remote_policy/sponsorship are shown too):
 In `jd_sources` below, reference JD text ONLY with `key[i]` pointers from the
 above listing (e.g. `responsibilities[0]`). Never retype JD text into jd_sources.
 
-Respond with ONLY a single JSON object — no text before or after — with EXACTLY
-this shape:
-
-{
-  "position_title": "<the role title>",
-  "categories": [
-    {
-      "key": "snake_case_key_1",
-      "label": "Human Label 1",
-      "max": 30,
-      "icon": "•",
-      "anchors": [
-        {"min_points": 0, "band": "no credible evidence of this yet"},
-        {"min_points": 15, "band": "some evidence, gaps remain"},
-        {"min_points": 30, "band": "clear evidence matching the JD wording"}
-      ],
-      "jd_sources": ["<a `key[i]` pointer from the JOB POSTING listing above, e.g. responsibilities[0]>"],
-    }
-  ],
-  "bonus_max": 10,
-  "bonus_signals": ["exceptional, role-relevant signals that deserve bonus points"],
-  "derivation": {
-    "scoreable": ["<every required skill and responsibility that counts toward the score>"],
-    "eligibility": ["<schedule/shift/location/sponsorship requirements - NOT scored, with their exact JD wording>"],
-    "removed": [
-      {"field": "<noise that is not in the JD at all>", "role": "noise", "reason": "<why it was dropped>"}
-    ]
-  }
-}
+Respond with ONLY a single JSON object — no text before or after — shaped
+EXACTLY like the WORKED EXAMPLE below.
 
 Rules:
 
@@ -71,13 +44,77 @@ Guidelines:
   signals). Never infer importance from generic industry expectations.
   Sum of maxes 10-100; identical maxes only when the JD provides roughly equal
   emphasis; bonus_max integer 0-20.
+
+WORKED EXAMPLE — a complete, valid rubric for a DIFFERENT, smaller sample JD.
+Study its discipline: short JD-literal band wording (no invented vocabulary),
+`key[i]` pointers only, min_points ascending from 0. Never copy its text into
+your rubrics.
+
+Sample JD:
+- responsibilities[0] Write and maintain automated test suites
+- responsibilities[1] Review pull requests for test coverage
+- skills.required[0] Knowledge of a test framework like pytest
+
+Correct rubric:
+{
+  "position_title": "QA Engineer",
+  "categories": [
+    {
+      "key": "test_automation",
+      "label": "Test Automation",
+      "max": 40,
+      "icon": "\u2022",
+      "anchors": [
+        {"min_points": 0, "band": "no evidence of automated tests"},
+        {"min_points": 20, "band": "wrote automated tests in one project"},
+        {"min_points": 40, "band": "maintained test suites as a core duty"}
+      ],
+      "jd_sources": ["responsibilities[0]"]
+    },
+    {
+      "key": "test_review",
+      "label": "Coverage Review",
+      "max": 20,
+      "icon": "\u2022",
+      "anchors": [
+        {"min_points": 0, "band": "no evidence of reviewing test coverage"},
+        {"min_points": 10, "band": "reviewed pull requests occasionally"},
+        {"min_points": 20, "band": "regularly reviews PRs for test coverage"}
+      ],
+      "jd_sources": ["responsibilities[1]"]
+    },
+    {
+      "key": "framework_knowledge",
+      "label": "Framework Knowledge",
+      "max": 20,
+      "icon": "\u2022",
+      "anchors": [
+        {"min_points": 0, "band": "no evidence of test framework use"},
+        {"min_points": 10, "band": "used a test framework in a project"},
+        {"min_points": 20, "band": "proficient with a test framework like pytest"}
+      ],
+      "jd_sources": ["skills.required[0]"]
+    }
+  ],
+  "bonus_max": 10,
+  "bonus_signals": ["open-source test contributions"],
+  "derivation": {
+    "scoreable": [
+      "write and maintain automated test suites",
+      "review pull requests for test coverage",
+      "knowledge of a test framework like pytest"
+    ],
+    "eligibility": [],
+    "removed": []
+  }
+}
 {%- else -%}
 You are evaluating a resume for the {{ position_title }}. Analyze the resume data
 and provide scores based on these criteria:
 
 **MANDATORY: You MUST always fill ALL categories: {{ category_keys }}.**
 
-## SCORING CRITERIA (pick each score using the JD-anchored bands)
+## SCORING CRITERIA (pick each score using the JD-anchored bands; use the full 0..max range — a category max is only for strong, direct evidence of that band)
 {% if default_bands -%}
 ## SHARED SCORE BANDS (apply to every category that does not list its own below)
 {% for anchor in default_bands -%}
@@ -109,37 +146,36 @@ and provide scores based on these criteria:
   critical_gaps. An unmet hard requirement never lowers category scores.
 
 ## RESPONSE RULES
-1. You MUST respond with ONLY the JSON structure below; no text before or after.
+1. You MUST respond with ONLY an object matching the provided output schema; no
+   text before or after.
 2. Fill ALL score categories; each score 0..max using the bands above.
-3. Provide quoted, resume-specific evidence per category and an
-   evidence_strength 0-3 (3 = evidence directly matches the JD wording).
+3. evidence: for each category, MANDATORY 1-3 `r[i]` pointers
+   (space-separated) from the indexed resume listing below (r[i] = resume
+   line i) — cite at least one, never leave it empty, and never retype
+   resume text; give an evidence_strength 0-3 (3 = evidence directly matches
+   a listed line).
 4. critical_gaps = genuinely missing required skills/conditions named in the JD.
+5. Keep every string compact (word caps apply per string, never per item
+   count): each key_strengths item ≤6 words, each areas_for_improvement item
+   ≤8 words, each critical_gaps item ≤6 words, bonus_points.breakdown ≤15
+   words total. Short phrases, no sentences, no preamble.
 
-{
-    "scores": {
-{% for cat in categories -%}
-        "{{ cat.key }}": {"score": 0, "max": {{ cat.max }}, "evidence": "string", "evidence_strength": 2}}{{ "," if not loop.last }}
-{% endfor %}
-    },
-    "bonus_points": {"total": 0, "breakdown": "string"},
-    "eligibility": {"eligible": true, "blocked_reasons": []},
-    "critical_gaps": ["genuinely missing requirement"],
-    "key_strengths": ["strength1", "strength2"],
-    "areas_for_improvement": ["improvement1"]
-}
+Return the evaluation schema object — scores: one entry per category key
+({{ category_keys }}) with {score, max, evidence, evidence_strength}; plus
+bonus_points{total, breakdown}, eligibility{eligible, blocked_reasons},
+critical_gaps[], key_strengths[], areas_for_improvement[].
 
-## CALIBRATION EXAMPLE (illustrative — never copy its text as this resume's evidence)
-This is a WORKED EXAMPLE of band usage for a generic role. It is NOT the resume
-you are scoring. Use it only to calibrate how strictly to apply 0..max per band.
+One-shot shape to mimic (placeholder key only — score from the bands above,
+evidences are r[i] pointers, terse phrases):
 
-Example role: "Backend Engineer (illustrative)". A candidate with a real shipped
-API, no mentoring duties and no open source scored:
-- api_design (max 10): 8 — band "solid shipped API evidence"
-- collaboration (max 10): 3 — band "some evidence, clear gaps remain"
-- mentorship (max 10): 0 — band "no evidence at all"
-Use the full 0..max range; a category max is rarely the score for partial evidence.
+{"scores": {"{{ first_category_key }}": {"score": 30, "evidence": "r4 r9", "evidence_strength": 3}},
+ "bonus_points": {"total": 2, "breakdown": "Contest win"},
+ "eligibility": {"eligible": true, "blocked_reasons": []},
+ "critical_gaps": ["Kafka"],
+ "key_strengths": ["MERN stack"],
+ "areas_for_improvement": ["Add monitoring"]}
 
-Resume to evaluate:
+Resume to evaluate (each line is indexed — cite it in `evidence` with `r[i]` pointers):
 
 {{ text_content }}
 {%- endif %}

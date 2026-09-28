@@ -45,7 +45,6 @@ def test_scoring_resume_text_keeps_vendor_skeleton() -> None:
     for snippet in (
         "def convert_json_resume_to_text(resume_data: JSONResume) -> str:",
         'text_parts.append("=== BASIC INFORMATION ===")',
-        "text_parts.append(f\"Name: {basics.name or 'Not provided'}\")",
         "if resume_data.work:",
         "for i, work in enumerate(resume_data.work, 1):",
         "if resume_data.education:",
@@ -62,6 +61,9 @@ def test_scoring_resume_text_keeps_vendor_skeleton() -> None:
     ):
         _assert_has(ours, snippet, where="resume_text.py")
         assert snippet in vendor, f"vendor transform.py drift: {snippet!r}"
+    assert "f\"Name: {basics.name or 'Not provided'}\"" not in ours, (
+        "resume_text.py: Name line leaked back in (S8 PII purge)"
+    )
 
 
 def test_scoring_resume_text_single_date_and_project_deltas_pinned() -> None:
@@ -190,7 +192,8 @@ def test_scoring_shared_anchor_dedupe_pinned() -> None:
     _assert_has(ours, "custom_bands", where="rubric_generator.py")
     tpl = _text(ROOT / "backend" / "app" / "core_engine" / "templates" / "rubric_generator_prompt.jinja")
     _assert_has(tpl, "SHARED SCORE BANDS", where="rubric_generator_prompt.jinja")
-    _assert_has(tpl, "CALIBRATION EXAMPLE", where="rubric_generator_prompt.jinja")
+    _assert_has(tpl, "use the full 0..max range", where="rubric_generator_prompt.jinja")
+    assert "CALIBRATION EXAMPLE" not in tpl, "rubric_generator_prompt.jinja: calibration block leaked back in (A2)"
 
 
 def test_scoring_4_2_prompt_rules_and_weight_flow() -> None:

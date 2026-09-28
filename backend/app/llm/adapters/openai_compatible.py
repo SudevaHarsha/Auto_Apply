@@ -53,6 +53,7 @@ class OpenAICompatibleAdapter:
         json_mode: bool = False,
         output_schema: dict[str, Any] | None = None,
         max_output_tokens: int | None = None,
+        temperature: float | None = None,
         timeout: float = 20.0,
     ) -> ChatResponse:
         url = _endpoint_url(base_url)
@@ -61,6 +62,8 @@ class OpenAICompatibleAdapter:
             messages.append({"role": "system", "content": system_message})
         messages.append({"role": "user", "content": prompt})
         body: dict[str, Any] = {"model": model, "messages": messages}
+        if temperature is not None:
+            body["temperature"] = temperature
         if json_mode:
             if output_schema:
                 body["response_format"] = {

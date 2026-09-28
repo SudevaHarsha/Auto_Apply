@@ -257,6 +257,7 @@ async def route_llm_request(
     json_mode: bool = False,
     output_schema: dict[str, Any] | None = None,
     max_output_tokens: int | None = None,
+    temperature: float | None = None,
     adapter_factory: Callable[[str], ProviderAdapter] | None = None,
     now: datetime | None = None,
 ) -> LLMResponse:
@@ -340,6 +341,7 @@ async def route_llm_request(
                 json_mode=json_mode,
                 output_schema=output_schema,
                 max_output_tokens=max_output_tokens,
+                temperature=temperature,
                 timeout=DEFAULT_TIMEOUT_SECONDS,
             )
             consumed.append(name)
@@ -441,6 +443,7 @@ async def generate_structured(
     step: str | None = None,
     max_repairs: int = 1,
     max_output_tokens: int | None = None,
+    temperature: float | None = None,
     adapter_factory: Callable[[str], ProviderAdapter] | None = None,
     now: datetime | None = None,
 ) -> Any:
@@ -538,6 +541,7 @@ async def generate_structured(
                     json_mode=True,
                     output_schema=schema,
                     max_output_tokens=max_output_tokens,
+                    temperature=temperature,
                     timeout=DEFAULT_TIMEOUT_SECONDS,
                 )
                 if response.status == "ok":

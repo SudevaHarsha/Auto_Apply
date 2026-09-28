@@ -42,7 +42,7 @@ REGISTRY: dict[str, ProviderSpec] = {
     "cloudflare-ai": ProviderSpec(
         OpenAICompatibleAdapter,
         "https://api.cloudflare.com/client/v4/accounts/<ACCOUNT_ID>/ai/v1",
-        "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+        "@cf/nvidia/nemotron-3-120b-a12b",
     ),
 }
 

@@ -1,17 +1,24 @@
 """Resume → plain-text conversion (copied from ``vendor/hiring_agent/transform.py:728-873``, D47).
 
-``convert_json_resume_to_text`` is the vendor function verbatim, with two
-AutoApply additions from S7 §8 that leave the overall shape untouched:
+``convert_json_resume_to_text`` is the vendor function verbatim, with AutoApply
+additions that leave the overall shape untouched:
 
-* single-date ``Period:`` lines for work / education / volunteer / projects (a
-  missing start or end date no longer renders ``"None - 2024"``); and
-* ``Technologies:`` / ``Skills:`` lines for projects, whose model already
+* S7 §8 — single-date ``Period:`` lines for work / education / volunteer /
+  projects (a missing start or end date no longer renders ``None - 2024``); and
+  ``Technologies:`` / ``Skills:`` lines for projects, whose model already
   carries those fields.
+* S8 — LLM-privacy and eval-token cuts: personal identifiers (name, email,
+  phone, location), all ``URL`` / ``Website`` / profile links, and every
+  education entry except the single highest are omitted from the text sent to
+  the LLM. The project ``Skills:`` line stays even when it duplicates
+  ``Technologies:`` (both carry the model's native fields).
 
 The vendor file itself stays byte-identical (I9); only this copy is enhanced.
 """
 
 from __future__ import annotations
+
+from typing import Any
 
 from backend.app.core_engine.resume_models import JSONResume
 
@@ -27,41 +34,33 @@ def _render_period(start_date: str | None, end_date: str | None) -> str | None:
     return None
 
 
+def _pick_highest_education(education: list[Any]) -> list[Any]:
+    """Return only the single most advanced education entry (S8 LLM-privacy).
+
+    Ranked by most recent start date (``YYYY-MM`` compares lexicographically);
+    an entry missing a start date falls back to its end date, and a fully
+    dateless entry ranks lowest. The remaining education history is omitted
+    from the resume text so the LLM only sees the top credential.
+    """
+    if not education:
+        return []
+    return [max(education, key=lambda e: e.startDate or e.endDate or "")]
+
+
 def convert_json_resume_to_text(resume_data: JSONResume) -> str:
     text_parts = []
 
     if resume_data.basics:
         basics = resume_data.basics
         text_parts.append("=== BASIC INFORMATION ===")
-        text_parts.append(f"Name: {basics.name or 'Not provided'}")
-        text_parts.append(f"Email: {basics.email or 'Not provided'}")
-        text_parts.append(f"Phone: {basics.phone or 'Not provided'}")
-        text_parts.append(f"Website: {basics.url or 'Not provided'}")
 
         if basics.summary:
             text_parts.append(f"Summary: {basics.summary}")
 
-        if basics.location:
-            loc = basics.location
-            location_parts = []
-            if loc.address:
-                location_parts.append(loc.address)
-            if loc.city:
-                location_parts.append(loc.city)
-            if loc.region:
-                location_parts.append(loc.region)
-            if loc.postalCode:
-                location_parts.append(loc.postalCode)
-            if loc.countryCode:
-                location_parts.append(loc.countryCode)
-
-            if location_parts:
-                text_parts.append(f"Location: {', '.join(location_parts)}")
-
         if basics.profiles:
             text_parts.append("Profiles:")
             for profile in basics.profiles:
-                text_parts.append(f"  - {profile.network}: {profile.username} ({profile.url})")
+                text_parts.append(f"  - {profile.network}: {profile.username}")
 
     if resume_data.work:
         text_parts.append("\n=== WORK EXPERIENCE ===")
@@ -70,8 +69,6 @@ def convert_json_resume_to_text(resume_data: JSONResume) -> str:
             period = _render_period(work.startDate, work.endDate)
             if period:
                 text_parts.append(f"   Period: {period}")
-            if work.url:
-                text_parts.append(f"   Website: {work.url}")
             if work.summary:
                 text_parts.append(f"   Description: {work.summary}")
             if work.highlights:
@@ -81,7 +78,7 @@ def convert_json_resume_to_text(resume_data: JSONResume) -> str:
 
     if resume_data.education:
         text_parts.append("\n=== EDUCATION ===")
-        for i, edu in enumerate(resume_data.education, 1):
+        for i, edu in enumerate(_pick_highest_education(resume_data.education), 1):
             text_parts.append(f"{i}. {edu.studyType} in {edu.area}")
             text_parts.append(f"   Institution: {edu.institution}")
             period = _render_period(edu.startDate, edu.endDate)
@@ -89,8 +86,6 @@ def convert_json_resume_to_text(resume_data: JSONResume) -> str:
                 text_parts.append(f"   Period: {period}")
             if edu.score:
                 text_parts.append(f"   Score: {edu.score}")
-            if edu.url:
-                text_parts.append(f"   Website: {edu.url}")
             if edu.courses:
                 text_parts.append(f"   Courses: {', '.join(edu.courses)}")
 
@@ -116,8 +111,6 @@ def convert_json_resume_to_text(resume_data: JSONResume) -> str:
                 text_parts.append(f"   Technologies: {', '.join(project.technologies)}")
             if project.skills:
                 text_parts.append(f"   Skills: {', '.join(project.skills)}")
-            if project.url:
-                text_parts.append(f"   URL: {project.url}")
             if project.highlights:
                 text_parts.append("   Highlights:")
                 for highlight in project.highlights:
@@ -134,15 +127,11 @@ def convert_json_resume_to_text(resume_data: JSONResume) -> str:
         text_parts.append("\n=== CERTIFICATES ===")
         for cert in resume_data.certificates:
             text_parts.append(f"• {cert.name} - {cert.issuer} ({cert.date})")
-            if cert.url:
-                text_parts.append(f"  URL: {cert.url}")
 
     if resume_data.publications:
         text_parts.append("\n=== PUBLICATIONS ===")
         for pub in resume_data.publications:
             text_parts.append(f"• {pub.name} - {pub.publisher} ({pub.releaseDate})")
-            if pub.url:
-                text_parts.append(f"  URL: {pub.url}")
             if pub.summary:
                 text_parts.append(f"  {pub.summary}")
 
@@ -172,8 +161,6 @@ def convert_json_resume_to_text(resume_data: JSONResume) -> str:
             period = _render_period(volunteer.startDate, volunteer.endDate)
             if period:
                 text_parts.append(f"  Period: {period}")
-            if volunteer.url:
-                text_parts.append(f"  Website: {volunteer.url}")
             if volunteer.summary:
                 text_parts.append(f"  Description: {volunteer.summary}")
             if volunteer.highlights:
