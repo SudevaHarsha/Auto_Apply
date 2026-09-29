@@ -83,7 +83,7 @@ PAYLOAD: dict[str, Any] = {
             "highlights": ["Ran weekly workshops"],
         }
     ],
-    "awards": [{"title": "Best Debugger", "date": "2024-02", "awarder": "Maigha media private limited"}],
+    "awards": [{"title": "Best Debugger", "date": "2024-02", "awarder": "IEEE Student Branch"}],
     "certificates": [{"name": "AWS Cloud Practitioner", "date": "2024-05", "issuer": "Amazon Web Services"}],
     "publications": [
         {
@@ -137,14 +137,19 @@ IDENTITY_TOKENS = (
     "Sree Venkateswara",
     "Nellore",
     "Nellore Robotics",
-    "Amazon Web Services",
-    "Springer",
     "Ravi Kumar",
     "ravi.kumar@corp.example.com",
     "example.dev",
     "docs.example.io",
     "discord-clone.example.dev",
     "svce.example.edu",
+)
+
+# Deliberately NOT redacted: a credential brand is the scoring signal.
+CREDENTIAL_ORGS = (
+    "Amazon Web Services",
+    "Springer",
+    "IEEE Student Branch",
 )
 
 SIGNAL_TOKENS = (
@@ -190,12 +195,45 @@ def test_named_third_parties_in_structured_fields_are_not_rendered() -> None:
     """A name that only ever appears in a structured field is simply dropped."""
     text = _text()
     assert "• Mentor" in text  # volunteer position kept, organization dropped
-    assert "• AWS Cloud Practitioner" in text  # certificate issuer dropped
-    assert "• Scaling React Apps" in text  # publisher dropped
     assert "• Reference 1" in text  # referee name dropped
     assert "Organization 1" not in text
-    assert "Issuer 1" not in text
-    assert "Publisher 1" not in text
+
+
+def test_credential_orgs_are_kept_because_they_are_the_signal() -> None:
+    """Awards/certificates/publications keep their awarder/issuer/publisher."""
+    text = _text()
+    for org in CREDENTIAL_ORGS:
+        assert org in text, f"credential org removed from the prompt: {org}"
+    assert "• AWS Cloud Practitioner - Amazon Web Services (2024-05)" in text
+    assert "• Scaling React Apps - Springer (2023-08)" in text
+    assert "• Best Debugger - IEEE Student Branch (2024-02)" in text
+
+
+def test_credential_org_that_is_also_an_employer_is_still_masked() -> None:
+    """Identity wins over credential: the same string registered as the
+    candidate's employer is masked even when it appears as an awarder."""
+    payload = {
+        "basics": {"name": "A B"},
+        "work": [{"name": "Maigha media private limited", "position": "Engineer"}],
+        "awards": [{"title": "Best Debugger", "date": "2024-02", "awarder": "Maigha media private limited"}],
+    }
+    text = convert_json_resume_to_text(JSONResume.model_validate(payload))
+    assert "Maigha" not in text
+    assert "• Best Debugger - Client 1 (2024-02)" in text
+
+
+def test_credential_org_still_cannot_smuggle_a_link_or_email() -> None:
+    payload = {
+        "basics": {"name": "A B"},
+        "certificates": [
+            {"name": "Cert", "issuer": "Acme Institute", "url": "https://acme.example.com"},
+        ],
+        "awards": [{"title": "Winner", "awarder": "acme@example.com"}],
+    }
+    text = convert_json_resume_to_text(JSONResume.model_validate(payload))
+    assert "https://" not in text
+    assert "acme@example.com" not in text
+    assert "Acme Institute" in text
 
 
 def test_legal_suffix_is_swallowed_not_left_behind() -> None:

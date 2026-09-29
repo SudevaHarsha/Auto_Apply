@@ -68,13 +68,13 @@ def test_scoring_resume_text_keeps_vendor_skeleton() -> None:
         ("{profile.network}: {profile.username}", "profile username (IS the candidate's name)"),
         ("{work.position} at {work.name}", "employer name"),
         ('f"   Institution: {edu.institution}"', "school/institute name"),
-        ("{award.title} - {award.awarder}", "awarding body"),
-        ("{cert.name} - {cert.issuer}", "certificate issuer"),
-        ("{pub.name} - {pub.publisher}", "publication publisher"),
         ("{volunteer.position} at {volunteer.organization}", "volunteer organization"),
         ('f"• {ref.name}"', "referee name"),
     ):
         assert leak not in ours, f"resume_text.py: {why} leaked back into the prompt (S8)"
+    # Credential orgs are intentionally kept — the brand is the scoring signal.
+    for keep in ("_with_org(redact(award.title", "_with_org(redact(cert.name", "_with_org(redact(pub.name"):
+        _assert_has(ours, keep, where="resume_text.py")
     _assert_has(ours, "redact = _redactor_for(resume_data)", where="resume_text.py")
 
 

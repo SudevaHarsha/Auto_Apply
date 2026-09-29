@@ -13,14 +13,18 @@ additions that leave the overall shape untouched:
   the LLM. The project ``Skills:`` line stays even when it duplicates
   ``Technologies:`` (both carry the model's native fields).
 * S8 — third-party identity redaction: no company, employer, volunteer
-  organization, awarding body, certificate issuer, publication publisher,
-  school/institute name or referee name is rendered, and any of those names —
-  plus the candidate's own name — are masked out of every free-text field
-  (summary, descriptions, highlights) they are mentioned in. Every link is
-  removed: structured ``url``/``username`` fields are dropped entirely and
-  URL-, domain-, email- and phone-shaped strings inside free text are masked
-  to ``[redacted]``. Role, dates, degree/area, technologies and skills survive,
-  so scoring signal is preserved while identity is not.
+  organization, school/institute name or referee name is rendered, and any of
+  those names — plus the candidate's own name — are masked out of every
+  free-text field (summary, descriptions, highlights) they are mentioned in.
+  Every link is removed: structured ``url``/``username`` fields are dropped
+  entirely and URL-, domain-, email- and phone-shaped strings inside free text
+  are masked to ``[redacted]``. Role, dates, degree/area, technologies and
+  skills survive, so scoring signal is preserved while identity is not.
+* S8 — credential orgs are deliberately KEPT: an award's awarder, a
+  certificate's issuer and a publication's publisher are rendered verbatim
+  (see ``_with_org``). Those are public, marketable credentials — the brand is
+  the signal — unlike an employer or a school, which link one resume to one
+  identifiable person.
 
 The vendor file itself stays byte-identical (I9); only this copy is enhanced.
 """
@@ -314,12 +318,9 @@ def _redactor_for(resume_data: JSONResume) -> Callable[[str], str]:
         add(work.name, "Client", include_head=True, deep=True)
     for volunteer in resume_data.volunteer or []:
         add(volunteer.organization, "Organization", include_head=True)
-    for award in resume_data.awards or []:
-        add(award.awarder, "Awarder", include_head=True)
-    for cert in resume_data.certificates or []:
-        add(cert.issuer, "Issuer", include_head=True)
-    for pub in resume_data.publications or []:
-        add(pub.publisher, "Publisher", include_head=True)
+    # Awards/certificates/publications are NOT registered: their awarder, issuer
+    # and publisher are kept verbatim in the prompt (see _with_org) because the
+    # credential brand is the scoring signal, not an identity leak.
     for edu in resume_data.education or []:
         add(edu.institution, "Institution", include_head=True)
     for ref in resume_data.references or []:
@@ -356,6 +357,24 @@ def _line(value: str | None, redact: Callable[[str], str], fallback: str = "") -
 def _dated(label: str, date: str | None) -> str:
     """``label (date)`` omitting a missing date (S7: never render ``None``)."""
     return f"{label} ({date})" if date else label
+
+
+def _with_org(label: str, org: str | None, redact: Callable[[str], str]) -> str:
+    """``label - Org`` for the credential-bearing sections (S8).
+
+    An award, a certificate and a publication are marketable credentials: the
+    brand that granted or published them *is* the signal ("AWS Solutions
+    Architect", "IEEE best paper"), so those org names are deliberately kept in
+    the prompt — unlike an employer, a school or a referee, they are a public
+    credential rather than a link to one identifiable person.
+
+    The org is still passed through the redactor, so a credential row cannot
+    smuggle a URL or an email address back in. An org that happens to be
+    registered as one of the candidate's own entities (an award from their
+    employer) is still masked — identity wins over credential.
+    """
+    parts = [part for part in (label, (org or "").strip()) if part]
+    return " - ".join(redact(part) for part in parts)
 
 
 def convert_json_resume_to_text(resume_data: JSONResume) -> str:
@@ -431,19 +450,19 @@ def convert_json_resume_to_text(resume_data: JSONResume) -> str:
     if resume_data.awards:
         text_parts.append("\n=== AWARDS ===")
         for award in resume_data.awards:
-            text_parts.append(f"• {_dated(redact(award.title or ''), award.date)}")
+            text_parts.append(f"• {_dated(_with_org(redact(award.title or ''), award.awarder, redact), award.date)}")
             if award.summary:
                 text_parts.append(f"  {redact(award.summary)}")
 
     if resume_data.certificates:
         text_parts.append("\n=== CERTIFICATES ===")
         for cert in resume_data.certificates:
-            text_parts.append(f"• {_dated(redact(cert.name or ''), cert.date)}")
+            text_parts.append(f"• {_dated(_with_org(redact(cert.name or ''), cert.issuer, redact), cert.date)}")
 
     if resume_data.publications:
         text_parts.append("\n=== PUBLICATIONS ===")
         for pub in resume_data.publications:
-            text_parts.append(f"• {_dated(redact(pub.name or ''), pub.releaseDate)}")
+            text_parts.append(f"• {_dated(_with_org(redact(pub.name or ''), pub.publisher, redact), pub.releaseDate)}")
             if pub.summary:
                 text_parts.append(f"  {redact(pub.summary)}")
 
