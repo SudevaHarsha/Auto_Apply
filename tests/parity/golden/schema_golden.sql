@@ -218,7 +218,7 @@ CREATE TABLE public.evidence (
     file_url text NOT NULL,
     metadata jsonb DEFAULT '{}'::jsonb,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT evidence_type_check CHECK ((type = ANY (ARRAY['screenshot'::text, 'pdf'::text, 'dom_snapshot'::text, 'profile_diff'::text, 'jd_raw'::text, 'message_raw'::text])))
+    CONSTRAINT evidence_type_check CHECK ((type = ANY (ARRAY['screenshot'::text, 'pdf'::text, 'dom_snapshot'::text, 'profile_diff'::text, 'jd_raw'::text, 'message_raw'::text, 'rubric_evidence'::text])))
 );
 ALTER TABLE ONLY public.evidence FORCE ROW LEVEL SECURITY;
 CREATE TABLE public.job_snapshots (
@@ -318,6 +318,16 @@ CREATE TABLE public.rate_limit_state (
     CONSTRAINT rate_limit_state_state_check CHECK ((state = ANY (ARRAY['OPEN'::text, 'CLOSED'::text, 'HALF_OPEN'::text])))
 );
 ALTER TABLE ONLY public.rate_limit_state FORCE ROW LEVEL SECURITY;
+CREATE TABLE public.rubric_cache (
+    id uuid DEFAULT public.uuid_generate_v4() NOT NULL,
+    job_id uuid NOT NULL,
+    snapshot_id uuid NOT NULL,
+    schema_version integer NOT NULL,
+    rubric jsonb NOT NULL,
+    rubric_sha256 text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT rubric_cache_schema_version_check CHECK ((schema_version = 1))
+);
 CREATE TABLE public.settings (
     user_id uuid NOT NULL,
     key text NOT NULL,
@@ -422,6 +432,8 @@ ALTER TABLE ONLY public.rate_limit_state
     ADD CONSTRAINT rate_limit_state_pkey PRIMARY KEY (id);
 ALTER TABLE ONLY public.rate_limit_state
     ADD CONSTRAINT rate_limit_state_provider_name_user_id_key UNIQUE (provider_name, user_id);
+ALTER TABLE ONLY public.rubric_cache
+    ADD CONSTRAINT rubric_cache_pkey PRIMARY KEY (id);
 ALTER TABLE ONLY public.settings
     ADD CONSTRAINT settings_pkey PRIMARY KEY (user_id, key);
 ALTER TABLE ONLY public.telegram_connections
@@ -473,6 +485,7 @@ CREATE INDEX idx_provider_usage_job_id ON public.provider_usage USING btree (job
 CREATE INDEX idx_provider_usage_provider_id ON public.provider_usage USING btree (provider_id);
 CREATE INDEX idx_provider_usage_user_id ON public.provider_usage USING btree (user_id);
 CREATE INDEX idx_rate_limit_provider_user ON public.rate_limit_state USING btree (provider_name, user_id);
+CREATE UNIQUE INDEX idx_rubric_cache_key ON public.rubric_cache USING btree (job_id, snapshot_id, schema_version);
 CREATE INDEX idx_telegram_connections_user_id ON public.telegram_connections USING btree (user_id);
 CREATE INDEX idx_telegram_messages_chat ON public.telegram_messages USING btree (user_id, chat_id);
 CREATE INDEX idx_telegram_messages_user_id ON public.telegram_messages USING btree (user_id);
@@ -538,6 +551,8 @@ ALTER TABLE ONLY public.provider_usage
     ADD CONSTRAINT provider_usage_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE;
 ALTER TABLE ONLY public.rate_limit_state
     ADD CONSTRAINT rate_limit_state_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE;
+ALTER TABLE ONLY public.rubric_cache
+    ADD CONSTRAINT rubric_cache_job_id_fkey FOREIGN KEY (job_id) REFERENCES public.jobs(id) ON DELETE CASCADE;
 ALTER TABLE ONLY public.settings
     ADD CONSTRAINT settings_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE;
 ALTER TABLE ONLY public.telegram_connections

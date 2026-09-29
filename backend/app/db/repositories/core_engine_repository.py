@@ -1,4 +1,4 @@
-"""core_engine repository — owns profiles, jobs, applications, pipeline_runs, job_snapshots."""
+"""core_engine repository — owns profiles, jobs, applications, pipeline_runs, job_snapshots, rubric_cache."""
 
 from __future__ import annotations
 
@@ -56,7 +56,7 @@ _VALID_PLATFORMS = frozenset({"greenhouse", "lever", "linkedin", "indeed", "work
 class CoreEngineRepository(BaseRepository):
     """core_engine owns profile/job/application/pipeline data plus the shared job_snapshots cache."""
 
-    owns = frozenset({"profiles", "jobs", "applications", "pipeline_runs", "job_snapshots"})
+    owns = frozenset({"profiles", "jobs", "applications", "pipeline_runs", "job_snapshots", "rubric_cache"})
 
     async def upsert_snapshot(
         self, content_hash: str, payload: dict[str, Any], *, raw_text: str | None = None
@@ -316,3 +316,107 @@ class CoreEngineRepository(BaseRepository):
             (Jsonb(json_resume), str(user_id), str(profile_id)),
         )
         return cur.rowcount == 1
+
+    # ----------------------------------------------------- scoring (S7: D56/D58)
+    async def get_rubric(self, job_id: uuid.UUID, snapshot_id: uuid.UUID, schema_version: int) -> dict[str, Any] | None:
+        """Read the cached rubric for (job, snapshot, schema_version) — shared, RLS-exempt (D58).
+
+        The caller recomputes ``rubric_sha256`` from the returned ``rubric`` to verify the
+        row is intact; a mismatch = corrupt row → treated as a cache miss. Returns ``None``
+        when no row exists for the key.
+        """
+        cur = await self.db.execute(
+            """SELECT id, job_id, snapshot_id, schema_version, rubric, rubric_sha256, created_at
+               FROM rubric_cache
+               WHERE job_id = %s AND snapshot_id = %s AND schema_version = %s""",
+            (str(job_id), str(snapshot_id), schema_version),
+        )
+        return _row(
+            await cur.fetchone(),
+            ["id", "job_id", "snapshot_id", "schema_version", "rubric", "rubric_sha256", "created_at"],
+        )
+
+    async def put_rubric(
+        self,
+        *,
+        job_id: uuid.UUID,
+        snapshot_id: uuid.UUID,
+        schema_version: int,
+        rubric: dict[str, Any],
+        rubric_sha256: str,
+    ) -> uuid.UUID:
+        """Conflict-safe rubric upsert (D58): exactly one row per (job, snapshot, schema_version).
+
+        ``ON CONFLICT (...) DO NOTHING`` keeps the first writer's row; the caller that lost a
+        concurrent miss (both generated, one insert wins) still scores from its own generated
+        rubric — a self-consistent per-op value either way.
+        """
+        row = await (
+            await self.db.execute(
+                """INSERT INTO rubric_cache (job_id, snapshot_id, schema_version, rubric, rubric_sha256)
+                   VALUES (%s, %s, %s, %s, %s)
+                   ON CONFLICT (job_id, snapshot_id, schema_version) DO NOTHING
+                   RETURNING id""",
+                (str(job_id), str(snapshot_id), schema_version, Jsonb(rubric), rubric_sha256),
+            )
+        ).fetchone()
+        if row is not None:
+            return row[0]
+        got = await (
+            await self.db.execute(
+                "SELECT id FROM rubric_cache WHERE job_id = %s AND snapshot_id = %s AND schema_version = %s",
+                (str(job_id), str(snapshot_id), schema_version),
+            )
+        ).fetchone()
+        if got is None:  # pragma: no cover - defensive
+            raise RuntimeError("rubric row vanished between insert and select")
+        return got[0]
+
+    async def set_job_score(self, user_id: uuid.UUID, job_id: uuid.UUID, score: int) -> bool:
+        """Persist the normalized score and flip the job to ``scored`` (D50/D56)."""
+        if not 0 <= score <= 100:
+            raise ValueError(f"job score must be 0..100, got {score}")
+        cur = await self.db.execute(
+            "UPDATE jobs SET score = %s, status = 'scored', updated_at = NOW() WHERE user_id = %s AND id = %s",
+            (score, str(user_id), str(job_id)),
+        )
+        return cur.rowcount == 1
+
+    async def set_profile_last_scored(self, user_id: uuid.UUID, profile_id: uuid.UUID) -> bool:
+        """Stamp ``profiles.last_scored_at`` after a successful score (D56)."""
+        cur = await self.db.execute(
+            "UPDATE profiles SET last_scored_at = NOW() WHERE user_id = %s AND id = %s",
+            (str(user_id), str(profile_id)),
+        )
+        return cur.rowcount == 1
+
+    async def insert_evidence(
+        self,
+        user_id: uuid.UUID,
+        *,
+        evidence_type: str,
+        file_url: str,
+        metadata: dict[str, Any],
+        application_id: uuid.UUID | None = None,
+    ) -> uuid.UUID:
+        """One ``evidence`` row (D52/I7). Written via raw SQL: ``evidence`` stays singularly
+        owned by ``ChromeExtensionRepository`` in the T2 ownership map; core_engine is the
+        second, documented writer for ``rubric_evidence`` rows (pre-package ``application_id``
+        is NULL — the applications binding lands at S9). RLS scopes the row to ``user_id``.
+        """
+        row = await (
+            await self.db.execute(
+                """INSERT INTO evidence (application_id, user_id, type, file_url, metadata)
+                   VALUES (%s, %s, %s, %s, %s) RETURNING id""",
+                (
+                    str(application_id) if application_id else None,
+                    str(user_id),
+                    evidence_type,
+                    file_url,
+                    Jsonb(metadata or {}),
+                ),
+            )
+        ).fetchone()
+        if row is None:  # pragma: no cover - defensive
+            raise RuntimeError("evidence INSERT returned no id")
+        return row[0]

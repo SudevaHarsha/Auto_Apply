@@ -1,0 +1,110 @@
+{
+  "basics": {
+    "name": "Ada Lovelace",
+    "label": "Software Engineer",
+    "email": "ada@example.com",
+    "phone": "+44 0000 000000",
+    "url": "https://ada.example.com",
+    "summary": "Backend engineer with 6 years building REST APIs and data platforms.",
+    "location": { "city": "London", "region": "England", "countryCode": "GB" },
+    "profiles": [
+      { "network": "GitHub", "username": "ada", "url": "https://github.com/ada" }
+    ]
+  },
+  "work": [
+    {
+      "name": "Analytical Engines Ltd",
+      "position": "Senior Backend Engineer",
+      "startDate": "2021-03-01",
+      "endDate": null,
+      "summary": "Owned the reporting API, cut p95 latency by 40%.",
+      "highlights": ["Deployed Postgres partitioning", "Mentored three engineers"]
+    },
+    {
+      "name": "Punch Card Systems",
+      "position": "Backend Engineer",
+      "startDate": "2018-01-01",
+      "endDate": "2021-02-28",
+      "url": "https://punch.dev",
+      "summary": "Built the billing pipeline in Python.",
+      "highlights": ["Introduced Docker CI", "APIs at 99.9% uptime"]
+    }
+  ],
+  "volunteer": [
+    {
+      "organization": "CodeBar",
+      "position": "Mentor",
+      "startDate": "2020-01-01",
+      "endDate": null,
+      "highlights": ["Weekly Python mentoring"]
+    }
+  ],
+  "education": [
+    {
+      "institution": "University of Cambridge",
+      "area": "Mathematics",
+      "studyType": "Bachelor",
+      "startDate": "2014-10-01",
+      "endDate": "2017-07-01",
+      "score": "1st class honours",
+      "courses": ["Optimization", "Combinatorics"]
+    }
+  ],
+  "awards": [
+    {
+      "title": "Analytical Engine Society Fellowship",
+      "date": "2016-01-01",
+      "awarder": "Analytical Engine Society",
+      "summary": "For contributions to algorithm design."
+    }
+  ],
+  "certificates": [
+    {
+      "name": "Advanced Distributed Systems",
+      "date": "2023-01-01",
+      "issuer": "Coursera",
+      "url": "https://coursera.org/cert/ada"
+    }
+  ],
+  "publications": [
+    {
+      "name": "On the application of machine learning to tables",
+      "publisher": "Analytical Notes",
+      "releaseDate": "2022-01-01"
+    }
+  ],
+  "skills": [
+    {
+      "name": "Backend Systems",
+      "level": "Advanced",
+      "keywords": ["Python", "FastAPI", "PostgreSQL", "Redis"]
+    },
+    {
+      "name": "Platform",
+      "level": "Intermediate",
+      "keywords": ["Docker", "Kubernetes", "CI/CD"]
+    }
+  ],
+  "languages": [
+    { "language": "English", "fluency": "Native speaker" },
+    { "language": "French", "fluency": "Intermediate" }
+  ],
+  "interests": [
+    { "name": "Babbage engines", "keywords": ["reconstruction"] }
+  ],
+  "references": [
+    { "name": "Charles Babbage", "reference": "Ada exceeds expectations." }
+  ],
+  "projects": [
+    {
+      "name": "Difference Engine Simulator",
+      "startDate": "2018-01-01",
+      "endDate": "2018-06-01",
+      "description": "Emulator of the Analytical Engine.",
+      "technologies": ["Python", "NumPy"],
+      "skills": ["Systems modeling"],
+      "url": "https://github.com/ada/diff-engine",
+      "highlights": ["Renders computation traces", "Virtual gears"]
+    }
+  ]
+}

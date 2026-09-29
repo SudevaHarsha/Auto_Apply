@@ -1,0 +1,272 @@
+"""I9 guard — the S7 scoring copies stay attached to their vendored originals.
+
+``test_guards.py::test_vendor_read_only`` pins the vendor *bytes* via
+``scripts/vendor.sha256``. This guard pins the *copy* side: the AutoApply
+scoring modules must keep the vendored skeleton verbatim so future edits remain
+diffable against ``vendor/hiring_agent``. Documented deltas are allowed and
+pinned separately (they are intentional, not drift):
+
+* ``resume_text.py`` renders single-date ``Period:`` lines and adds project
+  ``Technologies:``/``Skills:`` (S7 §8).
+* ``role.py`` adds a non-vendored ``RoleDefinition``; ``Category`` and the
+  vendored field lines stay verbatim.
+* ``scoring_models.py`` removes ``Deductions`` and adds ``evidence_strength``
+  (C1 → opaque penalties replaced by ``critical_gaps``/``eligibility``);
+  ``scorer.py`` drops ``total -= evaluation.deductions.total`` from the math
+  (S7-v2 §10, Fix 4/C1).
+* ``rubric_generator_*.jinja`` carry the 4.2 hardening — band word cap +
+  JD-emphasis weighting — pinned via ``test_scoring_4_2_prompt_rules_and_weight_flow``.
+
+Math skeleton pinned semantically (``_total_math`` re-structured but identical
+expressions); evaluation schemas pinned line-verbatim (``Type``→``type`` alias
+is the only allowed token change).
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[2]
+VENDOR = ROOT / "vendor" / "hiring_agent"
+SCORING = ROOT / "backend" / "app" / "core_engine" / "scoring"
+
+
+def _text(path: Path) -> str:
+    return path.read_text(encoding="utf-8")
+
+
+def _assert_has(source: str, snippet: str, *, where: str = "") -> None:
+    assert snippet in source, f"{where}: missing vendored skeleton {snippet!r}"
+
+
+def test_scoring_resume_text_keeps_vendor_skeleton() -> None:
+    ours = _text(SCORING / "resume_text.py")
+    vendor = _text(VENDOR / "transform.py")
+    for snippet in (
+        "def convert_json_resume_to_text(resume_data: JSONResume) -> str:",
+        'text_parts.append("=== BASIC INFORMATION ===")',
+        "if resume_data.work:",
+        "for i, work in enumerate(resume_data.work, 1):",
+        "if resume_data.education:",
+        "if resume_data.skills:",
+        "if resume_data.projects:",
+        "if resume_data.awards:",
+        "if resume_data.certificates:",
+        "if resume_data.publications:",
+        "if resume_data.languages:",
+        "if resume_data.interests:",
+        "if resume_data.references:",
+        "if resume_data.volunteer:",
+        'return "\\n".join(text_parts)',
+    ):
+        _assert_has(ours, snippet, where="resume_text.py")
+        assert snippet in vendor, f"vendor transform.py drift: {snippet!r}"
+    assert "f\"Name: {basics.name or 'Not provided'}\"" not in ours, (
+        "resume_text.py: Name line leaked back in (S8 PII purge)"
+    )
+    for leak, why in (
+        ("{profile.network}: {profile.username}", "profile username (IS the candidate's name)"),
+        ("{work.position} at {work.name}", "employer name"),
+        ('f"   Institution: {edu.institution}"', "school/institute name"),
+        ("{volunteer.position} at {volunteer.organization}", "volunteer organization"),
+        ('f"• {ref.name}"', "referee name"),
+    ):
+        assert leak not in ours, f"resume_text.py: {why} leaked back into the prompt (S8)"
+    # Credential orgs are intentionally kept — the brand is the scoring signal.
+    for keep in ("_with_org(redact(award.title", "_with_org(redact(cert.name", "_with_org(redact(pub.name"):
+        _assert_has(ours, keep, where="resume_text.py")
+    _assert_has(ours, "redact = _redactor_for(resume_data)", where="resume_text.py")
+
+
+def test_scoring_resume_text_single_date_and_project_deltas_pinned() -> None:
+    """The documented S7 deltas exist; the unfixed vendor line is gone."""
+    ours = _text(SCORING / "resume_text.py")
+    _assert_has(ours, "def _render_period(", where="resume_text.py")
+    _assert_has(ours, "if project.technologies:", where="resume_text.py")
+    _assert_has(ours, "if project.skills:", where="resume_text.py")
+    assert 'f"   Period: {work.startDate} - {work.endDate}"' not in ours, (
+        "resume_text.py: unfixed vendor Period line leaked in"
+    )
+
+
+def test_scoring_total_math_skeleton() -> None:
+    ours = _text(SCORING / "scorer.py")
+    for snippet in (
+        'min(data["score"], data["max"])',
+        'max_score += data["max"]',
+        "total += evaluation.bonus_points.total",
+        "role.bonus_max",
+    ):
+        _assert_has(ours, snippet, where="scorer.py")
+    assert "total -= evaluation.deductions.total" not in ours, (
+        "scorer.py: deductions math re-introduced (C1/S7-v2 removed it)"
+    )
+
+
+def test_scoring_s7_v2_deduction_removal_and_eligibility_deltas_pinned() -> None:
+    """C1/S7-v2 deltas: Deductions gone, evidence strength + eligibility added."""
+    ours = _text(SCORING / "scoring_models.py")
+    assert "class Deductions(BaseModel):" not in ours, (
+        "scoring_models.py: opaque Deductions model re-introduced (C1/S7-v2)"
+    )
+    _assert_has(
+        ours,
+        "evidence_strength: int = Field(ge=0, le=3,",
+        where="scoring_models.py",
+    )
+    _assert_has(ours, "class Eligibility(BaseModel):", where="scoring_models.py")
+    _assert_has(ours, "eligibility=(Eligibility, ...)", where="scoring_models.py")
+    _assert_has(
+        ours,
+        'Field(default_factory=list, description="Required skills/conditions the resume is missing"),',
+        where="scoring_models.py",
+    )
+    _assert_has(ours, "def build_evaluation_model(", where="scoring_models.py")
+
+
+def test_scoring_models_keep_vendor_skeleton() -> None:
+    ours = _text(SCORING / "scoring_models.py")
+    vendor = _text(VENDOR / "models.py")
+    for snippet in (
+        "class CategoryScore(BaseModel):",
+        'score: float = Field(ge=0, description="Score achieved in this category")',
+        'max: int = Field(gt=0, description="Maximum possible score")',
+        'evidence: str = Field(min_length=1, description="Evidence supporting the score")',
+        "fields = {category.key: (CategoryScore, ...) for category in categories}",
+        'return create_model("Scores", **fields)',
+        'Field(ge=0, le=role.bonus_max, description="Total bonus points")',
+        '"EvaluationData",',
+    ):
+        _assert_has(ours, snippet, where="scoring_models.py")
+        assert snippet in vendor, f"vendor models.py drift: {snippet!r}"
+
+
+def test_scoring_role_keeps_vendor_fields() -> None:
+    ours = _text(SCORING / "role.py")
+    vendor = _text(VENDOR / "roles.py")
+    for snippet in (
+        "@dataclass(frozen=True)",
+        "class Category:",
+        "key: str",
+        "label: str",
+        "max: int",
+        "class Role:",
+        "position_title: str",
+        "bonus_max: int",
+        "min_final_score: int",
+        "max_final_score: int",
+        "criteria_source: str",
+        "system_message_source: str",
+    ):
+        _assert_has(ours, snippet, where="role.py")
+        assert snippet in vendor, f"vendor roles.py drift: {snippet!r}"
+    _assert_has(vendor, "categories: List[Category]", where="vendor roles.py")
+    _assert_has(ours, "categories: list[Category]", where="role.py")
+
+
+def test_scoring_role_definition_is_autoapply_owned() -> None:
+    ours = _text(SCORING / "role.py")
+    _assert_has(ours, "class RoleDefinition:", where="role.py")
+    _assert_has(ours, "def max_final_score(self) -> int:", where="role.py")
+    assert "read_text(encoding=" not in ours, "role.py: vendored role.json file loading must not appear in AutoApply"
+
+
+def test_scoring_rubric_repair_env_toggle_pinned() -> None:
+    """S7-v2 live testing: the gate-repair call is gated by SCORING_DISABLE_RUBRIC_REPAIR."""
+    ours = _text(SCORING / "rubric_generator.py")
+    _assert_has(ours, "def _repair_enabled() -> bool:", where="rubric_generator.py")
+    _assert_has(
+        ours,
+        'os.environ.get("SCORING_DISABLE_RUBRIC_REPAIR", "").strip().lower() not in {"1", "true", "yes"}',
+        where="rubric_generator.py",
+    )
+    _assert_has(
+        ours,
+        "if not gate.passed and _repair_enabled():",
+        where="rubric_generator.py",
+    )
+
+
+def test_scoring_anchor_lint_checks_pinned() -> None:
+    """Upgrade-2 anchor lint: soft quality checks must exist on the gate path."""
+    ours = _text(SCORING / "rubric_generator.py")
+    _assert_has(ours, "def _anchor_lint(", where="rubric_generator.py")
+    _assert_has(ours, "band text shares no content words with the JD corpus", where="rubric_generator.py")
+    _assert_has(ours, "identical anchor ladder on both categories", where="rubric_generator.py")
+    _assert_has(ours, "binary 2-band ladder", where="rubric_generator.py")
+    _assert_has(ours, "for hit in _anchor_lint(rubric, jd_tokens):", where="rubric_generator.py")
+
+
+def test_scoring_shared_anchor_dedupe_pinned() -> None:
+    """Upgrade-1 eval token cut: shared-ladder dedupe helper exists."""
+    ours = _text(SCORING / "rubric_generator.py")
+    _assert_has(ours, "def _shared_anchor_bands(categories: list[Any])", where="rubric_generator.py")
+    _assert_has(ours, "custom_bands", where="rubric_generator.py")
+    tpl = _text(ROOT / "backend" / "app" / "core_engine" / "templates" / "rubric_generator_prompt.jinja")
+    _assert_has(tpl, "SHARED SCORE BANDS", where="rubric_generator_prompt.jinja")
+    _assert_has(tpl, "use the full 0..max range", where="rubric_generator_prompt.jinja")
+    assert "CALIBRATION EXAMPLE" not in tpl, "rubric_generator_prompt.jinja: calibration block leaked back in (A2)"
+
+
+def test_scoring_4_2_prompt_rules_and_weight_flow() -> None:
+    """4.2 prompt hardening pinned: band cap + JD-emphasis weighting.
+
+    Generate templates must carry the band rule (≤8 words, JD-grounded,
+    observable resume evidence, top band = category max) and the weighting rule
+    (never infer importance from generic industry expectations). And the eval
+    render must let distinct category maxes reach the scorer, so the JD-emphasis
+    weights actually change scores rather than sit unused in the rubric.
+    """
+    import sys
+
+    sys.path.insert(0, str(ROOT / "backend"))  # guards run without backend/ on sys.path
+    from app.core_engine.scoring.rubric_generator import build_role_definition
+    from app.core_engine.scoring.schemas import RubricAnchor, RubricFacet, RubricSchema
+
+    tpl = _text(ROOT / "backend" / "app" / "core_engine" / "templates" / "rubric_generator_prompt.jinja")
+    sys_tpl = _text(ROOT / "backend" / "app" / "core_engine" / "templates" / "rubric_generator_system.jinja")
+    _assert_has(tpl, "top band equals category max", where="rubric_generator_prompt.jinja")
+    _assert_has(tpl, "describes observable resume evidence", where="rubric_generator_prompt.jinja")
+    _assert_has(tpl, "infer importance from generic", where="rubric_generator_prompt.jinja")
+    _assert_has(sys_tpl, "Scale max by the JD's own relative emphasis", where="rubric_generator_system.jinja")
+
+    rubric = RubricSchema(
+        position_title="Backend Engineer",
+        bonus_max=10,
+        categories=[
+            RubricFacet(
+                key="backend_depth",
+                label="Backend Depth",
+                max=35,
+                anchors=[
+                    RubricAnchor(min_points=0, band="shipped Go services"),
+                    RubricAnchor(min_points=35, band="owns production Go systems"),
+                ],
+                jd_sources=["responsibilities[0]"],
+            ),
+            RubricFacet(
+                key="cloud_ops",
+                label="Cloud Ops",
+                max=20,
+                anchors=[
+                    RubricAnchor(min_points=0, band="no AWS experience"),
+                    RubricAnchor(min_points=20, band="runs AWS in production"),
+                ],
+                jd_sources=["responsibilities[1]"],
+            ),
+            RubricFacet(
+                key="documentation",
+                label="Documentation",
+                max=5,
+                anchors=[
+                    RubricAnchor(min_points=0, band="no docs written"),
+                    RubricAnchor(min_points=5, band="maintains team docs"),
+                ],
+                jd_sources=["responsibilities[2]"],
+            ),
+        ],
+    )
+    role_def = build_role_definition(rubric, name="test")
+    for expected in ("(0-35 points)", "(0-20 points)", "(0-5 points)"):
+        _assert_has(role_def.criteria, expected, where="eval criteria")
+    assert role_def.criteria.count("(0-35 points)") == 1

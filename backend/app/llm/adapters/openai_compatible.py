@@ -52,6 +52,8 @@ class OpenAICompatibleAdapter:
         api_key: str | None = None,
         json_mode: bool = False,
         output_schema: dict[str, Any] | None = None,
+        max_output_tokens: int | None = None,
+        temperature: float | None = None,
         timeout: float = 20.0,
     ) -> ChatResponse:
         url = _endpoint_url(base_url)
@@ -60,6 +62,8 @@ class OpenAICompatibleAdapter:
             messages.append({"role": "system", "content": system_message})
         messages.append({"role": "user", "content": prompt})
         body: dict[str, Any] = {"model": model, "messages": messages}
+        if temperature is not None:
+            body["temperature"] = temperature
         if json_mode:
             if output_schema:
                 body["response_format"] = {
@@ -72,6 +76,8 @@ class OpenAICompatibleAdapter:
                 }
             else:
                 body["response_format"] = {"type": "json_object"}
+        if max_output_tokens is not None:
+            body["max_tokens"] = max_output_tokens
         headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
         started = time.monotonic()
         try:
@@ -92,13 +98,18 @@ class OpenAICompatibleAdapter:
             try:
                 data = resp.json()
                 content = None
+                truncated = False
                 for choice in data.get("choices") or []:
                     content = (choice.get("message") or {}).get("content")
+                    if choice.get("finish_reason") == "length":
+                        truncated = True
                     if content:
                         break
                 usage = data.get("usage") or {}
                 prompt_tokens = int(usage.get("prompt_tokens") or 0)
                 completion_tokens = int(usage.get("completion_tokens") or 0)
+                if not truncated and max_output_tokens is not None and completion_tokens >= max_output_tokens:
+                    truncated = True
             except (TypeError, ValueError):
                 return ChatResponse(
                     status="http_error",
@@ -113,6 +124,7 @@ class OpenAICompatibleAdapter:
                 prompt_tokens=prompt_tokens,
                 completion_tokens=completion_tokens,
                 latency_ms=latency_ms,
+                truncated=truncated,
             )
         if resp.status_code == 429:
             return ChatResponse(
@@ -123,7 +135,13 @@ class OpenAICompatibleAdapter:
                 latency_ms=latency_ms,
             )
         error_type = (
-            "invalid_key" if resp.status_code == 401 else "server_error" if resp.status_code >= 500 else "http_error"
+            "insufficient_credits"
+            if resp.status_code == 402
+            else "invalid_key"
+            if resp.status_code == 401
+            else "server_error"
+            if resp.status_code >= 500
+            else "http_error"
         )
         return ChatResponse(
             status="http_error",

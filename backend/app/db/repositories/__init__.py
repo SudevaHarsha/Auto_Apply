@@ -40,6 +40,7 @@ OWNERSHIP: dict[str, str] = {
     "applications": "CoreEngineRepository",
     "pipeline_runs": "CoreEngineRepository",
     "job_snapshots": "CoreEngineRepository",
+    "rubric_cache": "CoreEngineRepository",
     "llm_providers": "LlmRouterRepository",
     "provider_usage": "LlmRouterRepository",
     "rate_limit_state": "LlmRouterRepository",
@@ -56,4 +57,5 @@ OWNERSHIP: dict[str, str] = {
 # Snapshots are RLS-exempt (I1) and shared; core_engine is the writer (owns them here),
 # but they are intentionally readable by every component. That shared-read is not a
 # violation of the ownership guard: global reads are exempted by design (see brief S2 §4).
-SNAPSHOT_SHARED_READ = {"job_snapshots"}
+# rubric_cache (S7 D58) follows the same shared, RLS-exempt pattern.
+SNAPSHOT_SHARED_READ = {"job_snapshots", "rubric_cache"}

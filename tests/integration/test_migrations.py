@@ -29,8 +29,9 @@ def summary() -> dict:
 
 
 def test_migration_apply_and_verify(summary: dict) -> None:
-    assert summary["tables"] == 21  # +026 auth_sessions
-    assert summary["indexes"] == 40  # +2 idx_auth_sessions_*, +1 idx_profiles_user_sha256 (028)
+    assert summary["tables"] == 22  # +026 auth_sessions, +031 rubric_cache
+    assert summary["indexes"] == 41  # +2 idx_auth_sessions_*, +1 idx_profiles_user_sha256 (028),
+    #                                  +1 idx_rubric_cache_key (031)
     assert summary["rls_enabled"] == 20
     assert summary["rls_forced"] == 20
     assert summary["policies"] == 22
@@ -50,8 +51,8 @@ def test_migrations_apply_twice_on_fresh_db() -> None:
             admin.execute(f"DROP DATABASE IF EXISTS {SCRATCH_DB} WITH (FORCE)")
             admin.execute(f"CREATE DATABASE {SCRATCH_DB}")
             applied, summary = migrate(scratch_url)
-            assert len(applied) == 29  # 001..029
-            assert summary["tables"] == 21
+            assert len(applied) == 31  # 001..031
+            assert summary["tables"] == 22
             assert summary["policies"] == 22
     finally:
         admin.execute(f"DROP DATABASE IF EXISTS {SCRATCH_DB} WITH (FORCE)")
@@ -74,6 +75,8 @@ def test_rls_forced_19_and_snapshots_are_exempt() -> None:
     assert "auth_sessions" in forced  # 026: same tenant-scope contract
     assert "job_snapshots" not in enabled
     assert "job_snapshots" not in forced
+    assert "rubric_cache" not in enabled  # D58: shared rubric cache is RLS-exempt
+    assert "rubric_cache" not in forced
 
 
 def test_job_snapshots_columns_and_unique_hash() -> None:
@@ -122,12 +125,12 @@ def test_checkpoint_step_enum_is_exact() -> None:
     assert step_def.count("'") // 2 == len(expected), "unexpected extra step literals"
 
 
-def test_index_count_40() -> None:
+def test_index_count_41() -> None:
     with psycopg.connect(ADMIN_URL) as conn:
         count = conn.execute(
             "SELECT count(*) FROM pg_indexes WHERE schemaname = 'public' AND indexname LIKE 'idx\\_%'"
         ).fetchone()[0]
-    assert count == 40
+    assert count == 41
 
 
 def test_snapshot_fks_on_applications_and_jobs() -> None:

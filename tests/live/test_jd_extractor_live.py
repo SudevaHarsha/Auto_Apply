@@ -3,10 +3,11 @@
 The full production cascade with real ATS postings from ``LIVE_ATS_URL`` and NO
 mock anywhere:
 
-  real ``fetch_http`` (NAT64-aware SSRF guard, D33) → Door-1 JSON-LD / Door 2-3
-  text extraction → Door 4 mandatory 4-section LLM calls via the default adapter
-  factory (real providers, keys from ``.env.live``) → Door 5 gap-fill → plausibility
-  gate → snapshot + job rows persisted with ``content_hash``/``raw_text`` (D28).
+  real ``default_fetch`` (browser-first Playwright render with httpx fallback;
+  NAT64-aware SSRF guard, D33) → Door-1 JSON-LD / Door 2-3 text extraction →
+  Door 4 mandatory 4-section LLM calls via the default adapter factory (real
+  providers, keys from ``.env.live``) → Door 5 gap-fill → plausibility gate →
+  snapshot + job rows persisted with ``content_hash``/``raw_text`` (D28).
 
 Cache is disabled for these runs so every execution is a genuine fresh extraction
 (``JD_CACHE_ENABLED=0`` — the URL-keyed cache is shared across users and would
@@ -49,11 +50,17 @@ pytestmark = pytest.mark.live
 APP_URL = os.getenv("DATABASE_URL", "postgresql://app_user:changeme_in_production@localhost:5435/autoapply")
 PASSWORD = "Str0ng!password"
 
-CLOUD_PROVIDERS = ("gemini", "groq", "openrouter")
+CLOUD_PROVIDERS = ("groq", "gemini", "openrouter", "nara", "cloudflare-ai")
 KEY_ENV = {
     "gemini": "LIVE_GEMINI_API_KEY",
     "groq": "LIVE_GROQ_API_KEY",
     "openrouter": "LIVE_OPENROUTER_API_KEY",
+    "nara": "LIVE_NARA_API_KEY",
+    "cloudflare-ai": "LIVE_CLOUDFLARE_AI_API_KEY",
+}
+BASE_URL_ENV = {
+    "ollama": "LIVE_OLLAMA_URL",
+    "cloudflare-ai": "LIVE_CLOUDFLARE_AI_BASE_URL",
 }
 
 _ATS_OUTAGES = (FetchFailedError, JobNotFoundError, NotAPostingError, StructuredJDValidationError)
@@ -65,6 +72,14 @@ def _key(name: str) -> str | None:
     if not stripped or stripped.upper().startswith("PASTE_"):
         return None
     return stripped
+
+
+def _base_url(name: str) -> str | None:
+    env = BASE_URL_ENV.get(name, "")
+    raw = os.environ.get(env, "").strip() if env else ""
+    if not raw or raw.upper().startswith("PASTE_"):
+        return None
+    return raw
 
 
 def _configured() -> list[tuple[str, str | None]]:
@@ -108,7 +123,7 @@ async def live_ctx() -> dict:
     try:
         for index, (name, key) in enumerate(_configured()):
             await LlmProviderService(conn).add_provider(
-                user_id=user_id, name=name, base_url=None, api_key=key, priority=index
+                user_id=user_id, name=name, base_url=_base_url(name), api_key=key, priority=index
             )
     except Exception:
         await conn.close()
@@ -143,7 +158,7 @@ async def _run_one(conn: psycopg.AsyncConnection, user_id: uuid.UUID, url: str) 
         str(user_id),
     )
     try:
-        result = await extract_job(conn, user_id, url, adapter_factory=None, fetch=None, render=None)
+        result = await extract_job(conn, user_id, url, adapter_factory=None, fetch=None)
     except _ATS_OUTAGES as exc:
         pytest.skip(f"live ATS unreachable/blocked for {url}: {exc}")
     except Exception as exc:  # noqa: BLE001 - surface 429/quota distinctly below

@@ -34,16 +34,24 @@ class GeminiAdapter:
         api_key: str | None = None,
         json_mode: bool = False,
         output_schema: dict[str, Any] | None = None,
+        max_output_tokens: int | None = None,
+        temperature: float | None = None,
         timeout: float = 20.0,
     ) -> ChatResponse:
         url = f"{base_url.rstrip('/')}/v1beta/models/{model}:generateContent"
         body: dict[str, Any] = {"contents": [{"role": "user", "parts": [{"text": prompt}]}]}
         if system_message:
             body["system_instruction"] = {"parts": [{"text": system_message}]}
-        if json_mode:
-            generation: dict[str, Any] = {"responseMimeType": "application/json"}
-            if output_schema:
-                generation["responseSchema"] = gemini_response_schema(output_schema)
+        if json_mode or max_output_tokens is not None or temperature is not None:
+            generation: dict[str, Any] = {}
+            if json_mode:
+                generation["responseMimeType"] = "application/json"
+                if output_schema:
+                    generation["responseSchema"] = gemini_response_schema(output_schema)
+            if max_output_tokens is not None:
+                generation["maxOutputTokens"] = max_output_tokens
+            if temperature is not None:
+                generation["temperature"] = temperature
             body["generationConfig"] = generation
         headers = {"x-goog-api-key": api_key} if api_key else {}
         started = time.monotonic()
@@ -65,7 +73,10 @@ class GeminiAdapter:
             try:
                 data = resp.json()
                 content = None
+                truncated = False
                 for candidate in data.get("candidates") or []:
+                    if candidate.get("finishReason") == "MAX_TOKENS":
+                        truncated = True
                     for part in (candidate.get("content") or {}).get("parts") or []:
                         if part.get("text"):
                             content = part["text"]
@@ -89,6 +100,7 @@ class GeminiAdapter:
                 prompt_tokens=prompt_tokens,
                 completion_tokens=completion_tokens,
                 latency_ms=latency_ms,
+                truncated=truncated,
             )
         if resp.status_code == 429:
             retry_after = None
@@ -106,7 +118,9 @@ class GeminiAdapter:
                 latency_ms=latency_ms,
             )
         error_type = (
-            "invalid_key"
+            "insufficient_credits"
+            if resp.status_code == 402
+            else "invalid_key"
             if resp.status_code == 401
             else "model_not_found"
             if resp.status_code == 404

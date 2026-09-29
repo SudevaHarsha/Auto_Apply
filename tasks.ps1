@@ -149,7 +149,9 @@ switch ($Target) {
         Set-Item -Path env:MIGRATE_DATABASE_URL -Value (New-DbUrl $env:MIGRATE_DATABASE_URL $clone)
         Set-Item -Path env:DATABASE_URL -Value (New-DbUrl $env:DATABASE_URL $clone)
         try {
-            Invoke-Check { & $Py -m pytest tests/live -m live } -What "live provider tests"
+            $livePaths = @("tests/live")
+            if (Test-Path "tests/evals") { $livePaths += "tests/evals" }
+            Invoke-Check { & $Py -m pytest @livePaths -m live } -What "live provider tests"
         } finally {
             & $Py db/per_run_db.py cleanup
         }

@@ -63,9 +63,25 @@ def is_migrated(dbname: str = BASE_DB) -> bool:
 
 
 def ensure_baseline() -> None:
-    """Migrate the baseline DB if it is not already migrated (idempotent)."""
+    """Make the baseline a pristine schema-only template (idempotent).
+
+    1. Migrate the baseline DB if it is not already migrated.
+    2. Truncate every public table so the baseline carries zero data — the
+       clone contract (``CREATE DATABASE ... TEMPLATE autoapply``) inherits
+       *schema*, never rows. This keeps accidental writes to the baseline from
+       polluting every downstream clone.
+    """
     if not is_migrated():
         migrate(db_url(BASE_DB))
+    with psycopg.connect(db_url(BASE_DB), autocommit=True) as conn:
+        tables = [
+            r[0]
+            for r in conn.execute(
+                "SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename"
+            ).fetchall()
+        ]
+        if tables:
+            conn.execute(f"TRUNCATE {', '.join(tables)} RESTART IDENTITY CASCADE")
 
 
 # --------------------------------------------------------------------------- #
@@ -80,15 +96,40 @@ def existing_clones() -> list[str]:
     return [r[0] for r in rows]
 
 
+def _kick_sessions(dbname: str) -> None:
+    """Terminate other sessions on `dbname` (pgAdmin holds idle connections that
+    block ``CREATE DATABASE ... TEMPLATE``). Run as superuser, never touching the
+    caller's own connection because the maintenance ``postgres`` DB is used."""
+    with psycopg.connect(admin_url(), autocommit=True) as conn:
+        conn.execute(
+            "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = %s AND pid <> pg_backend_pid()",
+            (dbname,),
+        )
+
+
 def create_clone() -> str:
-    """Create a uniquely-named clone of the baseline; returns its DB name."""
+    """Create a uniquely-named clone of the baseline; returns its DB name.
+
+    ``CREATE DATABASE ... TEMPLATE`` requires zero sessions on the baseline, but
+    pgAdmin (part of the test compose stack) keeps idle connections that reopen
+    as they're terminated. So kick-and-retry a few times before giving up.
+    """
     import datetime
+    import time
 
     name = f"{PREFIX}_{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}"
     with psycopg.connect(admin_url(), autocommit=True) as conn:
         conn.execute(f"DROP DATABASE IF EXISTS {name} WITH (FORCE)")
-        conn.execute(f"CREATE DATABASE {name} TEMPLATE {BASE_DB}")
-    return name
+        for attempt in range(5):
+            _kick_sessions(BASE_DB)
+            try:
+                conn.execute(f"CREATE DATABASE {name} TEMPLATE {BASE_DB}")
+                return name
+            except psycopg.errors.ObjectInUse:
+                if attempt == 4:
+                    raise
+                time.sleep(0.4)
+    return name  # pragma: no cover - loop above always returns or raises
 
 
 def cleanup(keep: int = KEEP_LAST) -> list[str]:

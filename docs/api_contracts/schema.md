@@ -605,7 +605,7 @@ Trigger scoring of the profile against a specific job.
 - Calls `hiring-agent-main` evaluator.py + roles.py
 - Calls LLM Router for scoring
 - Updates `jobs.score` and `jobs.status = scored`
-- Logs `profile_scored` + `job_scored` to `audit_logs`
+- Logs `profile_scored` to `audit_logs`
 - Inserts into `provider_usage`
 
 ---
@@ -670,7 +670,7 @@ Get a single job with full details.
   "platform": "greenhouse",
   "source": "telegram",
   "status": "scored",
-  "score": 87.5,
+  "score": 87,
   "raw_message": "Hiring: Senior Backend Engineer with 5+ years...",
   "created_at": "2026-08-23T12:00:00Z",
   "updated_at": "2026-08-23T12:05:00Z"

@@ -30,6 +30,8 @@ class OllamaAdapter:
         api_key: str | None = None,
         json_mode: bool = False,
         output_schema: dict[str, Any] | None = None,
+        max_output_tokens: int | None = None,
+        temperature: float | None = None,
         timeout: float = 20.0,
     ) -> ChatResponse:
         url = f"{base_url.rstrip('/')}/api/chat"
@@ -40,6 +42,10 @@ class OllamaAdapter:
         body: dict[str, Any] = {"model": model, "messages": messages, "stream": False}
         if json_mode:
             body["format"] = "json"
+        if max_output_tokens is not None:
+            body["num_predict"] = max_output_tokens
+        if temperature is not None:
+            body["temperature"] = temperature
         started = time.monotonic()
         try:
             with httpx.Client(transport=self._transport, timeout=timeout) as client:
@@ -60,6 +66,7 @@ class OllamaAdapter:
                 data = resp.json()
                 prompt_tokens = int(data.get("prompt_eval_count") or 0)
                 completion_tokens = int(data.get("eval_count") or 0)
+                truncated = data.get("done_reason") == "length"
             except (TypeError, ValueError):
                 return ChatResponse(
                     status="http_error",
@@ -74,6 +81,7 @@ class OllamaAdapter:
                 prompt_tokens=prompt_tokens,
                 completion_tokens=completion_tokens,
                 latency_ms=latency_ms,
+                truncated=truncated,
             )
         if resp.status_code == 503:
             return ChatResponse(

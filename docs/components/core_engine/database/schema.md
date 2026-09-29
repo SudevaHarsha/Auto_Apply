@@ -2,7 +2,7 @@
 
 Tables owned by the core engine component.
 
-> **Canonical source:** `docs/database/schema.md` — migration 002 (profiles), 003 (jobs), 004 (applications), 015 (pipeline_runs), 025 (job_snapshots).
+> **Canonical source:** `docs/database/schema.md` — migration 002 (profiles), 003 (jobs), 004 (applications), 015 (pipeline_runs), 025 (job_snapshots), 030 (evidence types), 031 (rubric_cache).
 > If any column differs here vs canonical, canonical wins.
 
 ---
@@ -144,3 +144,31 @@ CREATE TABLE pipeline_runs (
 CREATE INDEX idx_pipeline_runs_job_id ON pipeline_runs(job_id);
 CREATE INDEX idx_pipeline_runs_user_id ON pipeline_runs(user_id);
 ```
+
+---
+
+## rubric_cache
+
+Shared, RLS-exempt rubric persistence — the generated rubric is a property of the JD snapshot, not
+of a user (no `user_id` column; same pattern as `job_snapshots`).
+
+> **Canonical source:** `docs/database/schema.md` — migration 031.
+
+```sql
+CREATE TABLE rubric_cache (
+    id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    job_id          UUID NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+    snapshot_id     UUID NOT NULL,
+    schema_version  INTEGER NOT NULL CHECK (schema_version = 1),
+    rubric          JSONB NOT NULL,
+    rubric_sha256   TEXT NOT NULL,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE UNIQUE INDEX idx_rubric_cache_key
+    ON rubric_cache (job_id, snapshot_id, schema_version);
+```
+
+One row per `(job_id, snapshot_id, schema_version)`; `rubric_sha256` is recomputed on read as the
+cache-integrity check (a mismatch = corrupt row → treated as a miss). Migration 030 extends the
+`evidence.type` CHECK to admit `rubric_evidence` for scoring facet evidence (I7/D52).

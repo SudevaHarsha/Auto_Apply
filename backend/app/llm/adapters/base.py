@@ -26,6 +26,7 @@ class ChatResponse:
     status_code: int | None = None
     retry_after: float | None = None
     error_type: str | None = None
+    truncated: bool = False
 
 
 class ProviderAdapter(Protocol):
@@ -41,5 +42,7 @@ class ProviderAdapter(Protocol):
         api_key: str | None = None,
         json_mode: bool = False,
         output_schema: dict[str, Any] | None = None,
+        max_output_tokens: int | None = None,
+        temperature: float | None = None,
         timeout: float = 20.0,
     ) -> ChatResponse: ...

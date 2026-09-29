@@ -54,7 +54,6 @@ from backend.app.core_engine.jd_doors import (  # noqa: E402
     door1_greenhouse,
     door1_lever,
     extract_json_ld,
-    looks_like_js_shell,
     strip_to_text,
 )
 from backend.app.core_engine.jd_prompts import build_door5_system, build_section_system  # noqa: E402
@@ -124,6 +123,7 @@ def _four_ok(*, header: dict[str, Any] | None = None, pt: int = 400, ct: int = 4
                 {
                     "good_to_have": ["ATS experience"],
                     "screening_question_hints": ["Describe a borked extraction"],
+                    "other": [],
                 }
             ),
             pt=pt,
@@ -144,22 +144,6 @@ def _fetch_stub(
             robots_allowed=None,
             ssrf_checked=False,
             engine=engine,
-        )
-
-    return _fake
-
-
-def _render_stub(body: bytes, count_box: dict[str, int]) -> Callable[[str], Any]:
-    async def _fake(request_url: str) -> jd_f.FetchedResult:
-        count_box["n"] += 1
-        return jd_f.FetchedResult(
-            url=request_url,
-            status_code=200,
-            headers={},
-            body=body,
-            robots_allowed=None,
-            ssrf_checked=False,
-            engine="browser",
         )
 
     return _fake
@@ -206,7 +190,6 @@ async def _run_extract(
     responses: list,
     *,
     fetch: Callable[[str], Any] | None = None,
-    render: Callable[[str], Any] | None = None,
     now: datetime | None = None,
 ) -> tuple[Any, dict[str, Any]]:
     factory, adapters, _log = scripted_factory({"gemini": responses})
@@ -215,7 +198,6 @@ async def _run_extract(
         user_id,
         url,
         fetch=fetch,
-        render=render,
         adapter_factory=factory,
         now=now,
     )
@@ -333,7 +315,7 @@ async def test_door2_jsonld_cascade_preserves_structured() -> None:
                     ok("{}"),  # header mock parse ok, all-None merge skips jsonld values
                     ok(json.dumps({"responsibilities": ["Build the retrieval stack"]})),
                     ok(json.dumps({"skills": {"required": ["PyTorch"]}})),
-                    ok(json.dumps({"good_to_have": ["RAG experience"]})),
+                    ok(json.dumps({"good_to_have": ["RAG experience"], "other": []})),
                 ]
             }
         )
@@ -349,7 +331,7 @@ async def test_door2_jsonld_cascade_preserves_structured() -> None:
         assert result.payload["title"] == "Staff Machine Learning Engineer"
         assert result.payload["company"] == "Acme Cloud"
         assert result.payload["location"] == "Toronto, ON, CA"
-        assert result.payload["employment_type"] == "FULL_TIME"
+        assert result.payload["employment_type"] == "Full-time"
         assert result.payload["salary"]["min"] == 200000.0
         assert result.payload["salary"]["currency"] == "USD"
         assert result.payload["experience_range"]["min_years"] == 7.0
@@ -376,12 +358,43 @@ async def test_door3_strip_ratio_and_boilerplate_shedding() -> None:
         assert tag not in text
 
 
-async def test_js_shell_signal_only_on_mount_shell() -> None:
-    empty = strip_to_text(_fixture("js_shell.html"))
-    assert len(empty) < 500
-    assert looks_like_js_shell(empty, _fixture("js_shell.html")) is True
-    plain = strip_to_text(_fixture("workday_ats.html"))
-    assert looks_like_js_shell(plain, _fixture("workday_ats.html")) is False
+async def test_browser_first_default_fetch_used_for_shell_pages() -> None:
+    """D39: the default Door 2-3 fetch is browser-first — a JS-shell page fetches
+    real content directly (no template-matching gate), indexed via default_fetch."""
+    conn, user = await _register()
+    try:
+        await _add_provider(conn, user.id)
+        url = _page_url()
+        factory, adapters, _ = scripted_factory({"gemini": _four_ok(header={})})
+
+        async def _browser_fetch(request_url: str) -> jd_f.FetchedResult:
+            assert request_url == url
+            return jd_f.FetchedResult(
+                url=url,
+                status_code=200,
+                headers={},
+                body=_fixture("workday_jsonld.html"),
+                robots_allowed=None,
+                ssrf_checked=True,
+                engine="browser",
+            )
+
+        result = await jd_ex.extract_job(
+            conn,
+            user.id,
+            url,
+            fetch=_browser_fetch,
+            adapter_factory=factory,
+        )
+        assert result.fetch_engine == "browser"
+        assert result.payload["_meta"]["fetch_engine"] == "browser"
+        assert result.payload["title"] == "Global Engineering - Cascadia Energy"  # rendered JSON-LD
+        assert result.payload["company"] == "Cascadia Energy"
+        assert result.payload["remote_policy"] == "Remote"
+        assert result.raw_text == strip_to_text(_fixture("workday_jsonld.html"))
+        assert len(adapters["gemini"].calls) == 4
+    finally:
+        await conn.close()
 
 
 # ================================================================== 3 — Door 4 locks (D40/D41)
@@ -561,7 +574,7 @@ async def test_door4_section_failure_isolation_and_door5_backfill() -> None:
                     ok(json.dumps({"title": "T", "company": "C", "location": "L"}), pt=400, ct=400),
                     ok(json.dumps({"responsibilities": ["Own data"]}), pt=400, ct=400),
                     http(500),  # skills router exhausted -> accrue(planned, 0)
-                    ok(json.dumps({"good_to_have": []}), pt=400, ct=400),
+                    ok(json.dumps({"good_to_have": [], "other": []}), pt=400, ct=400),
                     ok(
                         json.dumps({"skills": {"required": ["Python"], "preferred": ["FastAPI"]}}), pt=400, ct=400
                     ),  # door5
@@ -621,6 +634,76 @@ async def test_door4_refusal_never_aborts_and_door5_backfills() -> None:
         assert result.payload["responsibilities"] == ["Own the platform"]
         assert result.payload["skills"]["required"] == ["Go"]
         assert result.payload["_meta"]["extraction_tokens"] == 4 * 60 + 800  # 4 refusals + door5 ok
+    finally:
+        await conn.close()
+
+
+async def test_door5_drift_never_sinks_extraction() -> None:
+    """D49: Door-5 extra/invented keys are dropped; a bad contribution can't hard-fail."""
+    conn, user = await _register()
+    try:
+        await _add_provider(conn, user.id)
+        url = _page_url()
+        factory, adapters, _ = scripted_factory(
+            {
+                "gemini": [
+                    *_four_ok(refusals=True, pt=40, ct=20),
+                    ok(
+                        json.dumps(
+                            {
+                                "responsibilities": ["Own the platform"],
+                                "skills": {"required": ["Go"], "preferred": []},
+                                "benefits": ["health", "401k"],
+                            }
+                        ),
+                        pt=400,
+                        ct=400,
+                    ),
+                ]
+            }
+        )
+        result = await jd_ex.extract_job(
+            conn,
+            user.id,
+            url,
+            fetch=_fetch_stub(_fixture("greenhouse.html")),
+            adapter_factory=factory,
+        )
+        calls = adapters["gemini"].calls
+        assert len(calls) == 5
+        assert "benefits" not in result.payload
+        assert result.payload["responsibilities"] == ["Own the platform"]
+        assert result.payload["skills"]["required"] == ["Go"]
+        StructuredJD(**result.payload)  # forbid-gate still happy
+    finally:
+        await conn.close()
+
+
+async def test_door5_blank_response_tolerated() -> None:
+    """Door-5 returning non-object/empty JSON is a no-op, never a raise."""
+    conn, user = await _register()
+    try:
+        await _add_provider(conn, user.id)
+        url = _page_url()
+        factory, adapters, _ = scripted_factory(
+            {
+                "gemini": [
+                    *_four_ok(refusals=True, pt=40, ct=20),
+                    ok("[]", pt=20, ct=20),
+                ]
+            }
+        )
+        # generic_jsonld gives jsonld_found=True (D43 passes), but title/company/
+        # responsibilities/skills stay empty from doors, so Door 5 still runs.
+        result = await jd_ex.extract_job(
+            conn,
+            user.id,
+            url,
+            fetch=_fetch_stub(_fixture("generic_jsonld.html")),
+            adapter_factory=factory,
+        )
+        assert len(adapters["gemini"].calls) == 5
+        StructuredJD(**result.payload)
     finally:
         await conn.close()
 
@@ -1112,77 +1195,53 @@ async def test_freshness_ok_within_6h() -> None:
         await conn.close()
 
 
-# ================================================================== 9 — render escalation (D39)
-async def test_js_shell_escalates_to_browser_once() -> None:
+# ============================================================ 9 — browser-first default (D39)
+async def test_httpx_fetch_keeps_httpx_engine() -> None:
+    """Plain server-rendered pages fetched via the httpx fallback keep their engine."""
     conn, user = await _register()
     try:
         await _add_provider(conn, user.id)
         url = _page_url()
-        rendered_count: dict[str, int] = {"n": 0}
-        factory, adapters, _ = scripted_factory({"gemini": _four_ok(header={})})
-        result = await jd_ex.extract_job(
-            conn,
-            user.id,
-            url,
-            fetch=_fetch_stub(_fixture("js_shell.html")),
-            render=_render_stub(_fixture("workday_jsonld.html"), rendered_count),
-            adapter_factory=factory,
-        )
-        assert rendered_count["n"] == 1  # escalated exactly once
-        assert result.fetch_engine == "browser"
-        assert result.payload["title"] == "Global Engineering - Cascadia Energy"  # rendered JSON-LD
-        assert result.payload["company"] == "Cascadia Energy"
-        assert result.payload["remote_policy"] == "fully-remote"
-        assert result.payload["_meta"]["fetch_engine"] == "browser"
-        assert result.raw_text == strip_to_text(_fixture("workday_jsonld.html"))
-    finally:
-        await conn.close()
-
-
-async def test_no_render_for_plain_pages() -> None:
-    conn, user = await _register()
-    try:
-        await _add_provider(conn, user.id)
-        url = _page_url()
-        rendered_count: dict[str, int] = {"n": 0}
         result, adapters = await _run_extract(
             conn,
             user.id,
             url,
             _four_ok(),
             fetch=_fetch_stub(_fixture("workday_ats.html")),
-            render=_render_stub(_fixture("workday_jsonld.html"), rendered_count),
         )
-        assert rendered_count["n"] == 0
         assert result.fetch_engine == "httpx"
+        assert result.payload["_meta"]["fetch_engine"] == "httpx"
         assert len(adapters["gemini"].calls) == 4
     finally:
         await conn.close()
 
 
-async def test_rendered_and_plain_snapshots_are_distinct(monkeypatch) -> None:
+async def test_browser_and_httpx_snapshots_are_distinct(monkeypatch) -> None:
+    """Same URL, different engines/bodies → distinct content snapshots (D28/D39)."""
     conn, user = await _register()
     try:
         await _add_provider(conn, user.id)
         url = _page_url()
         monkeypatch.setenv("JD_CACHE_ENABLED", "0")
-        count_a: dict[str, int] = {"n": 0}
+
+        async def _browser_fetch(request_url: str) -> jd_f.FetchedResult:
+            return jd_f.FetchedResult(
+                url=request_url,
+                status_code=200,
+                headers={},
+                body=_fixture("workday_jsonld.html"),
+                robots_allowed=None,
+                ssrf_checked=True,
+                engine="browser",
+            )
+
+        _, _ = await _run_extract(conn, user.id, url, _four_ok(), fetch=_browser_fetch)
         _, _ = await _run_extract(
             conn,
             user.id,
             url,
             _four_ok(),
-            fetch=_fetch_stub(_fixture("js_shell.html")),
-            render=_render_stub(_fixture("workday_jsonld.html"), count_a),
-        )
-        count_b: dict[str, int] = {"n": 0}
-        _, _ = await _run_extract(
-            conn,
-            user.id,
-            url,
-            _four_ok(),
-            fetch=_fetch_stub(_fixture("js_shell.html")),
-            render=_render_stub(_fixture("workday_ats.html"), count_b),
+            fetch=_fetch_stub(_fixture("workday_ats.html")),
         )
         snaps = await _snapshots_for(conn, user.id, url)
         assert len(snaps) == 2
@@ -1516,10 +1575,11 @@ async def test_json_ld_extraction_port_full_mapping() -> None:
     data = extract_json_ld(_fixture("workday_jsonld.html"))
     assert data["title"] == "Global Engineering - Cascadia Energy"
     assert data["company"] == "Cascadia Energy"
-    assert data["remote_policy"] == "fully-remote"
+    assert data["remote_policy"] == "Remote"
     assert data["work_auth_visa"] == {"sponsorship": False}
-    assert data["employment_type"] == "FULL_TIME"
+    assert data["employment_type"] == "Full-time"
     assert data["salary"]["min"] == 125000.0 and data["salary"]["currency"] == "CAD"
+    assert data["salary"]["period"] == "year"
     assert data["experience_range"] == {"min_years": 4.0, "max_years": 8.0}
     assert "_html" in data
 
@@ -1663,7 +1723,7 @@ def test_no_s5_diffs() -> None:
     allowlist += sorted(
         str(p.relative_to(ROOT)).replace("\\", "/")
         for p in (ROOT / "backend" / "app" / "core_engine" / "templates").glob("*.jinja")
-        if not p.name.startswith("jd_")
+        if not p.name.startswith("jd_") and not p.name.startswith("rubric_generator_")
     )
     proc = subprocess.run(
         ["git", "-C", str(ROOT), "diff", "--exit-code", "HEAD", "--", *allowlist],

@@ -53,11 +53,17 @@ APP_URL = os.getenv("DATABASE_URL", "postgresql://app_user:changeme_in_productio
 
 PASSWORD = "Str0ng!password"
 
-CLOUD_PROVIDERS = ("gemini", "groq", "openrouter")
+CLOUD_PROVIDERS = ("groq", "gemini", "openrouter", "nara", "cloudflare-ai")
 KEY_ENV = {
     "gemini": "LIVE_GEMINI_API_KEY",
     "groq": "LIVE_GROQ_API_KEY",
     "openrouter": "LIVE_OPENROUTER_API_KEY",
+    "nara": "LIVE_NARA_API_KEY",
+    "cloudflare-ai": "LIVE_CLOUDFLARE_AI_API_KEY",
+}
+BASE_URL_ENV = {
+    "ollama": "LIVE_OLLAMA_URL",
+    "cloudflare-ai": "LIVE_CLOUDFLARE_AI_BASE_URL",
 }
 
 ROUTE_PROMPT = "Reply with exactly the single word: ok"
@@ -77,6 +83,15 @@ def _key(name: str) -> str | None:
     if not stripped or stripped.upper().startswith("PASTE_"):
         return None
     return stripped
+
+
+def _base_url(name: str) -> str | None:
+    """Optional per-provider base_url override; None for unset/placeholder values."""
+    env = BASE_URL_ENV.get(name, "")
+    raw = os.environ.get(env, "").strip() if env else ""
+    if not raw or raw.upper().startswith("PASTE_"):
+        return None
+    return raw
 
 
 def _configured() -> list[tuple[str, str | None]]:
@@ -134,8 +149,7 @@ async def _add_configured(
 ) -> dict[str, uuid.UUID]:
     ids: dict[str, uuid.UUID] = {}
     for index, (name, key) in enumerate(cfgs):
-        base_url = os.environ.get("LIVE_OLLAMA_URL", "").strip() if name == "ollama" else None
-        out = await _add(conn, user_id, name, api_key=key, base_url=base_url, priority=index)
+        out = await _add(conn, user_id, name, api_key=key, base_url=_base_url(name), priority=index)
         ids[name] = uuid.UUID(out.id)
     return ids
 

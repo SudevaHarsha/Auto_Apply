@@ -30,7 +30,7 @@ Converts a job description into a scoring rubric (dynamic Role definition).
 │                          │                                    │
 │                          ▼                                    │
 │  ┌────────────────────────────────────────────────────────┐   │
-│  │  Output: 3 files (in-memory or temp)                   │   │
+│  │  Output: 3 files (in-memory, cached)                   │   │
 │  │                                                        │   │
 │  │  ┌──────────────────────────────────────────────────┐  │   │
 │  │  │  role.json                                       │  │   │
@@ -87,11 +87,36 @@ hiring-agent-main has:
            → returns Role object
 
 AutoApply does:
-  1. Rubric Generator creates role.json in MEMORY (not disk)
-  2. Creates criteria.jinja in MEMORY
-  3. Creates system_message.jinja in MEMORY
-  4. Passes them directly to ResumeEvaluator
+  1. Rubric Generator creates role.json in MEMORY (not disk, no role directory)
+  2. Creates criteria.jinja + system_message.jinja in MEMORY
+  3. Builds the Role and passes it directly to ResumeEvaluator
+  4. Persists the generated rubric (role.json shape + rendered templates + rubric_sha256) to the
+     shared, RLS-exempt `rubric_cache` table — keyed `(job_id, snapshot_id, schema_version)` — so any
+     later score of the same JD snapshot (any user, or an S8 re-score) reuses it without a second
+     rubric-generation LLM call.
 
-No files written to disk. No role directory needed.
-The existing Role dataclass and evaluator work unchanged.
+No files are ever written to disk. No role directory is needed. "In memory" means the Rubric
+Generator performs no filesystem I/O for the role; the durable copy of a generated rubric lives in
+`rubric_cache` (DB), not in role files. The existing Role dataclass and evaluator work unchanged.
+
+---
+
+## Rubric Persistence (S7)
+
+The generated rubric is saved to the shared `rubric_cache` table (migration 031) so it survives
+process restarts and is re-used across users and re-scores:
+
+```
+rubric_cache(
+  job_id          UUID    → REFERENCES jobs(id) ON DELETE CASCADE
+  snapshot_id     UUID    → the exact JD snapshot the rubric was built against
+  schema_version  INT     → CURRENT_SCHEMA_VERSION at generation (bump = deliberate re-generation)
+  rubric_sha256   TEXT    → content guard, recomputed on read
+  rubric          JSONB   → role.json shape + rendered criteria/system + labels/weights
+  UNIQUE(job_id, snapshot_id, schema_version)
+)
+```
+
+Cache hit ⇒ 0 rubric-generation calls (evaluation only); miss ⇒ 1 rubric call, then exactly one
+`rubric_cache` row.
 ```

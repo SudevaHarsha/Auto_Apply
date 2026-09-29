@@ -100,3 +100,18 @@ Role: "Backend Engineer at Acme"
     └── "You are an expert technical recruiter...
          Be fair, objective, score only on demonstrated skills..."
 ```
+
+---
+
+## Rubric Source & Persistence
+
+The `Role Definition` (role.json shape + criteria.jinja + system_message.jinja) is **generated per
+JD** by the Rubric Generator (see `rubric_generator.md`) — it is never shipped as role files. For the
+current scoring op it is held in memory; the generated rubric is additionally **persisted to the
+shared `rubric_cache` table** keyed `(job_id, snapshot_id, schema_version)` (S7 D58), so re-scoring
+the same JD snapshot reuses the cached rubric — no second rubric-generation call — across users and
+across S8 re-scores. Cache miss ⇒ 1 rubric-generation LLM call + one cache write.
+
+Step 3's LLM call runs through the **LLM Router** (`route_llm_request`, S4) with `json_mode` +
+the `EvaluationData` `model_json_schema()` — failover / usage / audit are owned by the router (S7
+D48).
