@@ -9,7 +9,11 @@ from __future__ import annotations
 from typing import Any
 
 from backend.app.core_engine.resume_models import JSONResume
-from backend.app.core_engine.scoring.resume_text import convert_json_resume_to_text
+from backend.app.core_engine.scoring.resume_text import (
+    _entity_aliases,
+    _redactor_for,
+    convert_json_resume_to_text,
+)
 
 PAYLOAD: dict[str, Any] = {
     "basics": {
@@ -242,3 +246,70 @@ def test_empty_resume_renders_empty_text() -> None:
     assert convert_json_resume_to_text(JSONResume.model_validate({"basics": {"name": "X Y"}})).startswith(
         "=== BASIC INFORMATION ==="
     )
+
+
+# ------------------------------------------------------ employer-only depth ---
+def _employer_text(employer: str, prose: str) -> str:
+    payload = {
+        "basics": {"name": "A B"},
+        "work": [{"name": employer, "position": "Engineer", "summary": prose}],
+    }
+    return _redactor_for(JSONResume.model_validate(payload))(prose)
+
+
+def test_short_acronym_employer_is_masked_in_prose() -> None:
+    """2-3 char employer names are all-caps/digit brands, and must not leak."""
+    for employer, prose in (
+        ("IBM", "Built ETL for IBM"),
+        ("TCS", "Onsite at TCS"),
+        ("2U", "Contract at 2U"),
+    ):
+        out = _employer_text(employer, prose)
+        assert employer not in out, f"{employer} leaked: {out!r}"
+        assert "Client 1" in out
+
+
+def test_lowercase_short_employer_is_left_alone() -> None:
+    """The precision side of the acronym rule: real English words are not brands."""
+    assert _employer_text("Air", "Worked at Air") == "Worked at Air"
+    assert _entity_aliases("Air", include_head=True, deep=True) == []
+
+
+def test_employer_head_pair_uses_combined_length() -> None:
+    """A 4-char first token still yields a two-token head for employers."""
+    assert _entity_aliases("Tata Consultancy Services", include_head=True, deep=True) == [
+        "Tata Consultancy Services",
+        "Tata Consultancy",
+    ]
+    out = _employer_text("Tata Consultancy Services", "Joined Tata Consultancy in 2024")
+    assert "Tata" not in out
+    assert "Client 1" in out
+
+
+def test_longer_name_wins_over_an_overlapping_short_alias() -> None:
+    """Employer "Sree Venkateswara Systems" and school "Sree Venkateswara College
+    Of Engeneering" share a head; the long name must be masked whole, not
+    half-masked into "Client 1 College Of Engeneering"."""
+    payload = {
+        "basics": {"name": "A B"},
+        "work": [{"name": "Sree Venkateswara Systems", "position": "Engineer"}],
+        "education": [
+            {
+                "institution": "Sree Venkateswara College Of Engeneering",
+                "area": "Computer Science",
+                "studyType": "B.Tech",
+            }
+        ],
+    }
+    redact = _redactor_for(JSONResume.model_validate(payload))
+    out = redact("Graduated from Sree Venkateswara College Of Engeneering.")
+    assert out == "Graduated from Institution 2."
+    assert redact("Shipped at Sree Venkateswara Systems.") == "Shipped at Client 1."
+
+
+def test_school_aliases_stay_exact_match_only() -> None:
+    """Scope decision: deep surface forms are generated for employers only, so a
+    school name is masked on an exact full-name hit and nothing else."""
+    institution = "Sree Venkateswara College Of Engeneering"
+    assert _entity_aliases(institution, include_head=True, deep=False) == [institution]
+    assert _entity_aliases("MIT", include_head=True, deep=False) == []

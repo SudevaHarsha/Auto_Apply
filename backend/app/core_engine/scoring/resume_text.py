@@ -190,12 +190,36 @@ def _phone_mask(match: re.Match[str]) -> str:
     return _MASK
 
 
-def _entity_aliases(name: str, *, include_head: bool) -> list[str]:
+def _alias_len_ok(alias: str, *, short_acronyms: bool) -> bool:
+    """Length gate for one alias.
+
+    >= 4 chars is always masked. A 2-3 char name is masked only when
+    ``short_acronyms`` is on AND the token is acronym-shaped (all-caps or
+    containing a digit), so ``IBM``/``TCS``/``2U`` go while the lowercase
+    English words ``Sun``/``New``/``Air`` survive untouched.
+    """
+    if len(alias) >= 4:
+        return True
+    if not short_acronyms or not 2 <= len(alias) <= 3:
+        return False
+    return alias.isupper() or any(char.isdigit() for char in alias)
+
+
+def _entity_aliases(name: str, *, include_head: bool, deep: bool = False) -> list[str]:
     """Alias set for one named entity, longest first.
 
     ``include_head`` adds the leading one/two distinctive tokens so a shortened
     mention in prose ("Maigha Inc" for "Maigha media private limited") is still
     caught. It is off for person names, where the full phrase is the identity.
+
+    ``deep`` widens the rules for employers only, because employer names are the
+    ones that routinely reappear in prose in a shortened or acronym form:
+    short acronym names (``IBM``, ``TCS``, ``2U``) become maskable, and the
+    two-token head is derived from the combined distinctive length so a name
+    whose first token is short ("Tata Consultancy") is still caught. Schools,
+    awarding bodies and the rest keep the conservative rule set — an institution
+    name is not expected in free text, so an exact full-name hit is the safety
+    net and no extra surface forms are generated for it.
     """
     words = [w for w in re.split(r"[\s,]+", name.strip()) if w]
     if not words:
@@ -206,14 +230,24 @@ def _entity_aliases(name: str, *, include_head: bool) -> list[str]:
         aliases.add(" ".join(trimmed))
     if include_head and words:
         head = words[0].strip(".,")
-        if len(head) >= 5 and head.lower() not in _GENERIC_WORDS:
+        head_ok = len(head) >= 5 and head.lower() not in _GENERIC_WORDS
+        if head_ok:
             aliases.add(head)
-            if len(words) > 1:
-                second = words[1].strip(".,")
-                if len(head) + 1 + len(second) >= 8 and second.lower() not in _GENERIC_WORDS:
-                    aliases.add(f"{head} {second}")
+        if len(words) > 1:
+            second = words[1].strip(".,")
+            pair = f"{head} {second}"
+            head_floor = 5 if not deep else 4
+            pair_ok = (
+                len(head) >= head_floor
+                and len(second) >= 3
+                and len(pair) >= 8
+                and head.lower() not in _GENERIC_WORDS
+                and second.lower() not in _GENERIC_WORDS
+            )
+            if pair_ok:
+                aliases.add(pair)
     return sorted(
-        (a for a in aliases if len(a) >= 4 and a.lower() not in _GENERIC_WORDS),
+        (a for a in aliases if a.lower() not in _GENERIC_WORDS and _alias_len_ok(a, short_acronyms=deep)),
         key=len,
         reverse=True,
     )
@@ -255,15 +289,15 @@ def _redactor_for(resume_data: JSONResume) -> Callable[[str], str]:
     everywhere they appear in the rendered text.
     """
     protected = _protected_terms(resume_data)
-    rules: list[tuple[re.Pattern[str], str]] = []
+    rules: list[tuple[int, re.Pattern[str], str]] = []
     seen: set[str] = set()
     counter = 0
 
-    def add(name: str | None, label: str, *, include_head: bool) -> None:
+    def add(name: str | None, label: str, *, include_head: bool, deep: bool = False) -> None:
         nonlocal counter
         if not name:
             return
-        aliases = [a for a in _entity_aliases(name, include_head=include_head) if a.lower() not in protected]
+        aliases = [a for a in _entity_aliases(name, include_head=include_head, deep=deep) if a.lower() not in protected]
         if not aliases:
             return
         key = aliases[0].lower()
@@ -271,10 +305,13 @@ def _redactor_for(resume_data: JSONResume) -> Callable[[str], str]:
             return
         seen.add(key)
         counter += 1
-        rules.append((_entity_pattern(aliases), f"{label} {counter}"))
+        rules.append((max(len(alias) for alias in aliases), _entity_pattern(aliases), f"{label} {counter}"))
 
+    # Employers get the deep rule set: their names reappear in prose in
+    # shortened ("Maigha Inc") or acronym ("IBM") form far more than any other
+    # entity kind, and a miss there leaks the employer straight to the provider.
     for work in resume_data.work or []:
-        add(work.name, "Client", include_head=True)
+        add(work.name, "Client", include_head=True, deep=True)
     for volunteer in resume_data.volunteer or []:
         add(volunteer.organization, "Organization", include_head=True)
     for award in resume_data.awards or []:
@@ -290,6 +327,13 @@ def _redactor_for(resume_data: JSONResume) -> Callable[[str], str]:
     if resume_data.basics:
         add(resume_data.basics.name, "Candidate", include_head=False)
 
+    # Longest alias first: a short alias from one entity must never eat the prefix
+    # of a longer name from another (an employer "Sree Venkateswara Systems" and a
+    # school "Sree Venkateswara College Of Engeneering" share a head, and applying
+    # the short rule first would leave "... Client 1 College Of Engeneering").
+    # Python's sort is stable, so equal-specificity rules keep registration order.
+    ordered = sorted(rules, key=lambda rule: rule[0], reverse=True)
+
     def redact(text: str) -> str:
         if not text:
             return text
@@ -297,7 +341,7 @@ def _redactor_for(resume_data: JSONResume) -> Callable[[str], str]:
         out = _URL_RE.sub(_MASK, out)
         out = _DOMAIN_RE.sub(_domain_mask, out)
         out = _PHONE_RE.sub(_phone_mask, out)
-        for pattern, placeholder in rules:
+        for _specificity, pattern, placeholder in ordered:
             out = pattern.sub(placeholder, out)
         return out
 
